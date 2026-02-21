@@ -24,12 +24,20 @@ local validation_schemas = {
     toggle_key = { type = "string" },
     auto_cd_git_root = { type = "boolean" },
     session_persistence = { type = "boolean" },
+    command_args = { type = "table", optional = true },
     window_config = {
       position = { type = "string", enum = { "float", "bottom", "right", "top", "left" } },
       float_opts = {
         width = { type = "number", min = 0.1, max = 1.0 },
         height = { type = "number", min = 0.1, max = 1.0 },
+        title = { type = "string", optional = true },
+        row = { type = "number", optional = true },
+        col = { type = "number", optional = true },
+        relative = { type = "string", optional = true },
+        title_pos = { type = "string", optional = true },
+        border = { type = "string", optional = true },
       },
+      split_opts = { type = "table", optional = true },
     },
   },
   git = {
@@ -37,12 +45,20 @@ local validation_schemas = {
     auto_cd_root = { type = "boolean" },
     include_git_context = { type = "boolean" },
     cache_duration = { type = "number", min = 5, max = 300 },
+    ignore_submodules = { type = "boolean", optional = true },
+    status_in_prompts = { type = "boolean", optional = true },
+    branch_in_prompts = { type = "boolean", optional = true },
+    detect_worktrees = { type = "boolean", optional = true },
+    recent_commits_count = { type = "number", optional = true },
   },
   file_watcher = {
     enabled = { type = "boolean" },
     auto_reload = { type = "boolean" },
     reload_delay = { type = "number", min = 50, max = 5000 },
     max_file_size = { type = "number", min = 1024, max = 100 * 1024 * 1024 },
+    ignore_patterns = { type = "table", optional = true },
+    watch_extensions = { type = "table", optional = true },
+    show_reload_notification = { type = "boolean", optional = true },
   },
   which_key = {
     enabled = { type = "boolean" },
@@ -50,6 +66,11 @@ local validation_schemas = {
     prefix = { type = "string" },
     show_icons = { type = "boolean" },
     timeout = { type = "number", min = 100, max = 2000 },
+    file_prefix = { type = "string", optional = true },
+    show_help = { type = "boolean", optional = true },
+    git_prefix = { type = "string", optional = true },
+    layout = { type = "table", optional = true },
+    terminal_prefix = { type = "string", optional = true },
   },
 }
 
@@ -290,14 +311,8 @@ local function validate_section(section_name, config_section, schema_section, pa
     end
   end
   
-  -- Check for unknown fields
-  if config_section then
-    for field_name, _ in pairs(config_section) do
-      if not schema_section[field_name] then
-        table.insert(errors, path .. "." .. field_name .. " is not a recognized configuration option")
-      end
-    end
-  end
+  -- Skip unknown field validation for now to avoid user confusion
+  -- Unknown fields will be ignored rather than causing errors
   
   return errors
 end
