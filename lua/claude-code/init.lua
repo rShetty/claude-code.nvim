@@ -1,35 +1,146 @@
 -- Claude Code Neovim Plugin
--- Main initialization and command registration
+-- Enhanced main initialization with comprehensive module integration
 local config = require("claude-code.config")
 local api = require("claude-code.api")
 local ui = require("claude-code.ui")
 
+-- New enhanced modules
+local terminal = require("claude-code.terminal")
+local file_watcher = require("claude-code.file_watcher")
+local git = require("claude-code.git")
+local which_key = require("claude-code.which_key")
+
 local M = {}
 
--- Plugin state
+-- Plugin state with enhanced tracking
 M.initialized = false
+M.modules_loaded = {}
+M.startup_time = nil
+M.version = "2.0.0"
 
--- Setup function (called by user)
+-- Module loading order for proper dependency management
+local MODULE_LOAD_ORDER = {
+  "config",
+  "git", 
+  "file_watcher",
+  "terminal",
+  "which_key",
+  "api",
+  "ui"
+}
+
+-- Enhanced setup function with module lifecycle management
 function M.setup(user_config)
   if M.initialized then
+    vim.notify("Claude Code already initialized", vim.log.levels.WARN)
     return
   end
   
-  -- Setup configuration
-  config.setup(user_config)
+  local start_time = vim.loop.hrtime()
+  user_config = user_config or {}
   
-  -- Register all commands
-  M.register_commands()
+  -- Phase 1: Configuration setup and validation
+  M.init_configuration(user_config)
   
-  -- Create autocommands
+  -- Phase 2: Initialize modules in dependency order
+  M.init_modules(user_config)
+  
+  -- Phase 3: Register commands and setup keybindings
+  M.register_all_commands()
+  
+  -- Phase 4: Setup autocommands and integrations
   M.create_autocommands()
   
-  M.initialized = true
+  -- Phase 5: Post-initialization setup
+  M.finalize_setup()
   
-  vim.notify("Claude Code plugin initialized", vim.log.levels.INFO)
+  M.initialized = true
+  M.startup_time = (vim.loop.hrtime() - start_time) / 1e6 -- Convert to milliseconds
+  
+  vim.notify(string.format("Claude Code v%s initialized in %.2fms", M.version, M.startup_time), vim.log.levels.INFO)
 end
 
--- Register all Claude Code commands
+-- Phase 1: Configuration initialization
+function M.init_configuration(user_config)
+  -- Setup configuration with enhanced validation
+  config.setup(user_config)
+  config.setup_config_commands()
+  M.modules_loaded.config = true
+  
+  -- Validate configuration
+  local is_valid = config.validate()
+  if not is_valid then
+    vim.notify("Configuration validation failed. Some features may not work correctly.", vim.log.levels.WARN)
+  end
+end
+
+-- Phase 2: Module initialization
+function M.init_modules(user_config)
+  local cfg = config.get()
+  
+  -- Initialize git integration first (provides context for other modules)
+  if cfg.git and cfg.git.enabled then
+    git.setup(user_config.git)
+    M.modules_loaded.git = true
+  end
+  
+  -- Initialize file watcher
+  if cfg.file_watcher and cfg.file_watcher.enabled then
+    file_watcher.setup(user_config.file_watcher)
+    M.modules_loaded.file_watcher = true
+  end
+  
+  -- Initialize terminal integration
+  if cfg.terminal and cfg.terminal.enabled then
+    terminal.setup(user_config.terminal)
+    M.modules_loaded.terminal = true
+  end
+  
+  -- Initialize which-key integration (after terminal for key bindings)
+  if cfg.which_key and cfg.which_key.enabled then
+    which_key.setup(user_config.which_key)
+    which_key.setup_commands()
+    M.modules_loaded.which_key = true
+  end
+  
+  -- API and UI are always initialized
+  M.modules_loaded.api = true
+  M.modules_loaded.ui = true
+end
+
+-- Phase 3: Enhanced command registration
+function M.register_all_commands()
+  -- Register core commands
+  M.register_commands()
+  
+  -- Register module-specific commands if modules are loaded
+  if M.modules_loaded.terminal then
+    -- Terminal commands are registered in terminal.setup()
+  end
+  
+  if M.modules_loaded.git then
+    -- Git commands are registered in git.setup()
+  end
+  
+  if M.modules_loaded.file_watcher then
+    -- File watcher commands are registered in file_watcher.setup()
+  end
+end
+
+-- Phase 5: Post-initialization finalization
+function M.finalize_setup()
+  -- Setup which-key mappings after all commands are registered
+  if M.modules_loaded.which_key then
+    which_key.register_mappings()
+    which_key.register_visual_mappings()
+    which_key.update_mappings_for_features()
+  end
+  
+  -- Setup default keymaps
+  config.setup_keymaps()
+end
+
+-- Register core Claude Code commands
 function M.register_commands()
   -- Code writing commands
   vim.api.nvim_create_user_command("ClaudeWriteFunction", M.write_function, {
@@ -125,13 +236,15 @@ function M.register_commands()
   })
 end
 
--- Create autocommands
+-- Phase 4: Enhanced autocommands creation
 function M.create_autocommands()
-  -- Cleanup on exit
+  local group = vim.api.nvim_create_augroup("ClaudeCode", { clear = true })
+  
+  -- Enhanced cleanup on exit with all modules
   vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = group,
     callback = function()
-      ui.cleanup()
-      api.cancel_requests()
+      M.cleanup_all_modules()
     end,
   })
   
@@ -139,6 +252,42 @@ function M.create_autocommands()
   if config.get().features.completion.enabled then
     -- Could integrate with completion engines here
   end
+  
+  -- Plugin health monitoring
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = group,
+    pattern = "*",
+    callback = function()
+      -- Periodic health checks could go here
+    end,
+  })
+end
+
+-- Enhanced cleanup function for all modules
+function M.cleanup_all_modules()
+  -- Cleanup modules in reverse order
+  if M.modules_loaded.which_key then
+    which_key.cleanup()
+  end
+  
+  if M.modules_loaded.terminal then
+    terminal.cleanup()
+  end
+  
+  if M.modules_loaded.file_watcher then
+    file_watcher.cleanup()
+  end
+  
+  if M.modules_loaded.git then
+    git.cleanup()
+  end
+  
+  -- Core cleanup
+  ui.cleanup()
+  api.cancel_requests()
+  
+  -- Reset state
+  M.modules_loaded = {}
 end
 
 -- Command implementations
@@ -404,14 +553,18 @@ require("claude-code").setup({
   })
 end
 
--- Show status
+-- Enhanced status display with module information
 function M.show_status()
   local cfg = config.get()
   local auth_status = api.check_auth_status()
   
   local status_info = {
-    "Claude Code Plugin Status",
-    "========================",
+    "Claude Code Plugin Status (v" .. M.version .. ")",
+    "=" .. string.rep("=", 30 + #M.version),
+    "",
+    "Initialization:",
+    "- Status: " .. (M.initialized and "✅ Initialized" or "❌ Not Initialized"),
+    "- Startup Time: " .. (M.startup_time and string.format("%.2fms", M.startup_time) or "N/A"),
     "",
     "Authentication:",
     "- Method: " .. (auth_status.method == "cli" and "Claude CLI" or "HTTP API"),
@@ -422,20 +575,88 @@ function M.show_status()
     "- Base URL: " .. cfg.api.base_url,
     "- CLI Mode: " .. (cfg.api.use_cli == nil and "Auto-detect" or (cfg.api.use_cli and "Forced" or "Disabled")),
     "",
-    "Features:",
-    "- Code Completion: " .. (cfg.features.completion.enabled and "✅ Enabled" or "❌ Disabled"),
-    "- Code Writing: " .. (cfg.features.code_writing.enabled and "✅ Enabled" or "❌ Disabled"), 
-    "- Debugging: " .. (cfg.features.debugging.enabled and "✅ Enabled" or "❌ Disabled"),
-    "- Code Review: " .. (cfg.features.code_review.enabled and "✅ Enabled" or "❌ Disabled"),
-    "- Testing: " .. (cfg.features.testing.enabled and "✅ Enabled" or "❌ Disabled"),
-    "- Refactoring: " .. (cfg.features.refactoring.enabled and "✅ Enabled" or "❌ Disabled"),
-    "",
-    "Active Requests: " .. api.get_active_requests(),
+    "Loaded Modules:",
   }
   
+  -- Add module status
+  for module_name, loaded in pairs(M.modules_loaded) do
+    table.insert(status_info, "- " .. module_name:gsub("^%l", string.upper) .. ": " .. (loaded and "✅ Loaded" or "❌ Not Loaded"))
+  end
+  
+  table.insert(status_info, "")
+  table.insert(status_info, "Core Features:")
+  table.insert(status_info, "- Code Completion: " .. (cfg.features.completion.enabled and "✅ Enabled" or "❌ Disabled"))
+  table.insert(status_info, "- Code Writing: " .. (cfg.features.code_writing.enabled and "✅ Enabled" or "❌ Disabled"))
+  table.insert(status_info, "- Debugging: " .. (cfg.features.debugging.enabled and "✅ Enabled" or "❌ Disabled"))
+  table.insert(status_info, "- Code Review: " .. (cfg.features.code_review.enabled and "✅ Enabled" or "❌ Disabled"))
+  table.insert(status_info, "- Testing: " .. (cfg.features.testing.enabled and "✅ Enabled" or "❌ Disabled"))
+  table.insert(status_info, "- Refactoring: " .. (cfg.features.refactoring.enabled and "✅ Enabled" or "❌ Disabled"))
+  
+  table.insert(status_info, "")
+  table.insert(status_info, "Enhanced Features:")
+  table.insert(status_info, "- Terminal Integration: " .. (M.modules_loaded.terminal and "✅ Active" or "❌ Inactive"))
+  table.insert(status_info, "- File Watching: " .. (M.modules_loaded.file_watcher and "✅ Active" or "❌ Inactive"))
+  table.insert(status_info, "- Git Integration: " .. (M.modules_loaded.git and "✅ Active" or "❌ Inactive"))
+  table.insert(status_info, "- Which-key Integration: " .. (M.modules_loaded.which_key and "✅ Active" or "❌ Inactive"))
+  
+  table.insert(status_info, "")
+  table.insert(status_info, "Runtime Information:")
+  table.insert(status_info, "- Active Requests: " .. api.get_active_requests())
+  
+  -- Add module-specific information
+  if M.modules_loaded.terminal and terminal.is_active() then
+    table.insert(status_info, "- Terminal: Active")
+  end
+  
+  if M.modules_loaded.file_watcher then
+    local watched_files = file_watcher.get_watched_files()
+    table.insert(status_info, "- Watched Files: " .. #watched_files)
+  end
+  
+  if M.modules_loaded.git and git.get_current_project() then
+    table.insert(status_info, "- Git Project: " .. vim.fn.fnamemodify(git.get_current_project(), ":t"))
+  end
+  
   ui.show_response(status_info, {
-    title = "Claude Code - Status",
+    title = "Claude Code - Enhanced Status",
   })
+end
+
+-- Get plugin information
+function M.get_info()
+  return {
+    version = M.version,
+    initialized = M.initialized,
+    startup_time = M.startup_time,
+    modules_loaded = vim.deepcopy(M.modules_loaded),
+  }
+end
+
+-- Module management functions
+function M.reload_module(module_name)
+  if not M.modules_loaded[module_name] then
+    vim.notify("Module '" .. module_name .. "' is not loaded", vim.log.levels.WARN)
+    return false
+  end
+  
+  -- Module-specific reload logic
+  if module_name == "which_key" and M.modules_loaded.which_key then
+    which_key.force_reregister()
+    vim.notify("Which-key module reloaded", vim.log.levels.INFO)
+  elseif module_name == "terminal" and M.modules_loaded.terminal then
+    -- Terminal module doesn't need reloading typically
+    vim.notify("Terminal module is running", vim.log.levels.INFO)
+  else
+    vim.notify("Module '" .. module_name .. "' reload not supported", vim.log.levels.WARN)
+    return false
+  end
+  
+  return true
+end
+
+-- Check if a specific module is loaded and functioning
+function M.is_module_active(module_name)
+  return M.modules_loaded[module_name] or false
 end
 
 -- Toggle completion

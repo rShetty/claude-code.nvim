@@ -1,8 +1,497 @@
--- Test helpers for Claude Code Neovim Plugin
+-- Comprehensive test helpers for claude-code plugin
+-- Provides mocks, utilities, performance testing, and integration test support
+
 local M = {}
 
--- Mock vim API for testing
+-- Test state management
+local test_state = {
+  original_vim = {},
+  mock_timers = {},
+  mock_jobs = {},
+  mock_watchers = {},
+  performance_data = {},
+  async_operations = {},
+}
+
+-- Enhanced API Mock Creation Functions
+-- ====================================
+
+-- Create comprehensive vim.api mock
+function M.create_api_mock()
+  local buffers = {}
+  local windows = {}
+  local autocommands = {}
+  local user_commands = {}
+  local current_buf = 1
+  local current_win = 1000
+  
+  return {
+    -- Buffer management
+    nvim_create_buf = function(listed, scratch)
+      current_buf = current_buf + 1
+      buffers[current_buf] = {
+        lines = {},
+        name = "",
+        options = { filetype = "" },
+        valid = true
+      }
+      return current_buf
+    end,
+    
+    nvim_get_current_buf = function()
+      return current_buf
+    end,
+    
+    nvim_buf_is_valid = function(buf)
+      return buffers[buf] and buffers[buf].valid or false
+    end,
+    
+    nvim_buf_get_name = function(buf)
+      return buffers[buf] and buffers[buf].name or "test.lua"
+    end,
+    
+    nvim_buf_set_name = function(buf, name)
+      if buffers[buf] then
+        buffers[buf].name = name
+      end
+    end,
+    
+    nvim_buf_get_lines = function(buf, start, end_, strict)
+      local lines = buffers[buf] and buffers[buf].lines or {"test line"}
+      start = start or 0
+      end_ = end_ == -1 and #lines or (end_ or #lines)
+      
+      local result = {}
+      for i = start + 1, end_ do
+        table.insert(result, lines[i] or "")
+      end
+      return result
+    end,
+    
+    nvim_buf_set_lines = function(buf, start, end_, strict, replacement)
+      if not buffers[buf] then
+        buffers[buf] = { lines = {}, name = "", options = {} }
+      end
+      
+      local lines = buffers[buf].lines
+      start = start or 0
+      end_ = end_ == -1 and #lines or (end_ or #lines)
+      
+      -- Replace lines
+      for i = end_, start + 1, -1 do
+        table.remove(lines, i)
+      end
+      
+      for i, line in ipairs(replacement or {}) do
+        table.insert(lines, start + i, line)
+      end
+    end,
+    
+    nvim_buf_line_count = function(buf)
+      return buffers[buf] and #buffers[buf].lines or 1
+    end,
+    
+    nvim_buf_get_option = function(buf, option)
+      if buffers[buf] and buffers[buf].options[option] then
+        return buffers[buf].options[option]
+      end
+      -- Default values for common options
+      if option == "filetype" then return "lua" end
+      if option == "modified" then return false end
+      if option == "readonly" then return false end
+      if option == "modifiable" then return true end
+      return nil
+    end,
+    
+    nvim_buf_set_option = function(buf, option, value)
+      if not buffers[buf] then
+        buffers[buf] = { lines = {}, name = "", options = {} }
+      end
+      buffers[buf].options[option] = value
+    end,
+    
+    nvim_buf_add_highlight = function(buf, ns_id, hl_group, line, col_start, col_end)
+      -- Mock highlight addition
+    end,
+    
+    nvim_buf_call = function(buf, fn)
+      return fn()
+    end,
+    
+    -- Window management
+    nvim_open_win = function(buf, enter, config)
+      current_win = current_win + 1
+      windows[current_win] = {
+        buf = buf,
+        config = config,
+        valid = true,
+        cursor = {1, 0}
+      }
+      return current_win
+    end,
+    
+    nvim_get_current_win = function()
+      return current_win
+    end,
+    
+    nvim_win_is_valid = function(win)
+      return windows[win] and windows[win].valid or false
+    end,
+    
+    nvim_win_close = function(win, force)
+      if windows[win] then
+        windows[win].valid = false
+      end
+    end,
+    
+    nvim_win_get_buf = function(win)
+      return windows[win] and windows[win].buf or current_buf
+    end,
+    
+    nvim_win_set_buf = function(win, buf)
+      if windows[win] then
+        windows[win].buf = buf
+      end
+    end,
+    
+    nvim_win_get_cursor = function(win)
+      return windows[win] and windows[win].cursor or {1, 0}
+    end,
+    
+    nvim_win_set_cursor = function(win, pos)
+      if windows[win] then
+        windows[win].cursor = pos
+      end
+    end,
+    
+    nvim_win_get_option = function(win, option)
+      return nil -- Default mock behavior
+    end,
+    
+    nvim_win_set_option = function(win, option, value)
+      -- Mock option setting
+    end,
+    
+    nvim_list_wins = function()
+      local win_list = {}
+      for win_id, win_info in pairs(windows) do
+        if win_info.valid then
+          table.insert(win_list, win_id)
+        end
+      end
+      return win_list
+    end,
+    
+    nvim_list_bufs = function()
+      local buf_list = {}
+      for buf_id, buf_info in pairs(buffers) do
+        if buf_info.valid then
+          table.insert(buf_list, buf_id)
+        end
+      end
+      return buf_list
+    end,
+    
+    -- Autocommands
+    nvim_create_augroup = function(name, opts)
+      return { name = name, id = math.random(1000, 9999) }
+    end,
+    
+    nvim_create_autocmd = function(event, opts)
+      local autocmd_id = math.random(10000, 99999)
+      autocommands[autocmd_id] = {
+        event = event,
+        opts = opts,
+      }
+      return autocmd_id
+    end,
+    
+    -- User commands
+    nvim_create_user_command = function(name, command, opts)
+      user_commands[name] = {
+        command = command,
+        opts = opts or {}
+      }
+    end,
+    
+    -- Miscellaneous
+    nvim_get_current_line = function()
+      local buf_lines = buffers[current_buf] and buffers[current_buf].lines or {"test line"}
+      local cursor = windows[current_win] and windows[current_win].cursor or {1, 0}
+      return buf_lines[cursor[1]] or ""
+    end,
+    
+    nvim_replace_termcodes = function(str, from_part, do_lt, special)
+      return str -- Mock implementation
+    end,
+    
+    nvim_feedkeys = function(keys, mode, escape_csi)
+      -- Mock key feeding
+    end,
+    
+    -- Mock access to internal state for testing
+    _mock_state = {
+      buffers = buffers,
+      windows = windows,
+      autocommands = autocommands,
+      user_commands = user_commands,
+    }
+  }
+end
+
+-- Create comprehensive vim.fn mock
+function M.create_fn_mock()
+  return {
+    expand = function(expr)
+      if expr == "%:p" then return "/path/to/current/file.lua" end
+      if expr == "%:p:h" then return "/path/to/current" end
+      if expr == "%:t" then return "file.lua" end
+      if expr == "<cword>" then return "test_word" end
+      if expr == "<cfile>" then return "test_file" end
+      return "expanded_" .. tostring(expr)
+    end,
+    
+    input = function(prompt, default)
+      return default or "test_input"
+    end,
+    
+    confirm = function(msg, choices, default)
+      return default or 1
+    end,
+    
+    getcwd = function()
+      return "/test/working/directory"
+    end,
+    
+    fnamemodify = function(fname, mods)
+      if mods == ":t" then return "filename.lua" end
+      if mods == ":h" then return "/path/to" end
+      if mods == ":e" then return "lua" end
+      return fname
+    end,
+    
+    isdirectory = function(path)
+      return path:match("directory") and 1 or 0
+    end,
+    
+    filereadable = function(path)
+      return path:match("readable") and 1 or 0
+    end,
+    
+    glob = function(pattern)
+      return {"file1.lua", "file2.lua"}
+    end,
+    
+    getqflist = function()
+      return {
+        { text = "Error in file.lua:10: syntax error", lnum = 10, filename = "file.lua" }
+      }
+    end,
+    
+    setqflist = function(list)
+      -- Mock quickfix list setting
+    end,
+    
+    getreg = function(reg)
+      if reg == "+" then return "clipboard_content" end
+      return "register_content"
+    end,
+    
+    setreg = function(reg, value)
+      -- Mock register setting
+    end,
+    
+    getpos = function(mark)
+      if mark == "'<" then return {0, 1, 1, 0} end
+      if mark == "'>" then return {0, 3, 10, 0} end
+      return {0, 1, 1, 0}
+    end,
+    
+    mode = function(expr)
+      return "n" -- Normal mode by default
+    end,
+    
+    maparg = function(name, mode, abbr, dict)
+      return dict and {} or ""
+    end,
+    
+    tempname = function()
+      return "/tmp/nvim_" .. math.random(100000, 999999)
+    end,
+    
+    delete = function(fname)
+      return 0 -- Success
+    end,
+    
+    stdpath = function(type_)
+      if type_ == "cache" then return "/tmp/nvim/cache" end
+      if type_ == "config" then return "/tmp/nvim/config" end
+      if type_ == "data" then return "/tmp/nvim/data" end
+      return "/tmp/nvim"
+    end,
+    
+    shellescape = function(str)
+      return "'" .. str:gsub("'", "'\\''" ) .. "'"
+    end,
+    
+    fnameescape = function(str)
+      return str:gsub(" ", "\\ ")
+    end,
+    
+    -- Job control
+    jobstart = function(cmd, opts)
+      local job_id = math.random(1000, 9999)
+      test_state.mock_jobs[job_id] = {
+        cmd = cmd,
+        opts = opts,
+        running = true
+      }
+      
+      -- Simulate async job completion
+      if opts and opts.on_exit then
+        vim.defer_fn(function()
+          opts.on_exit(job_id, 0)
+        end, 10)
+      end
+      
+      return job_id
+    end,
+    
+    jobstop = function(job_id)
+      if test_state.mock_jobs[job_id] then
+        test_state.mock_jobs[job_id].running = false
+      end
+    end,
+    
+    jobwait = function(jobs, timeout)
+      return {0} -- All jobs completed successfully
+    end,
+    
+    chansend = function(id, data)
+      -- Mock channel send
+      return vim.tbl_count(data)
+    end,
+    
+    chanclose = function(id, stream)
+      -- Mock channel close
+    end,
+  }
+end
+
+-- Create notification mock
+function M.create_notify_mock()
+  local notifications = {}
+  
+  return function(msg, level, opts)
+    table.insert(notifications, {
+      message = msg,
+      level = level,
+      options = opts,
+      timestamp = os.time()
+    })
+  end
+end
+
+-- Create command execution mock
+function M.create_cmd_mock()
+  local executed_commands = {}
+  
+  return function(command)
+    table.insert(executed_commands, {
+      command = command,
+      timestamp = os.time()
+    })
+  end
+end
+
+-- Create keymap mock
+function M.create_keymap_mock()
+  local keymaps = {}
+  
+  return function(mode, lhs, rhs, opts)
+    keymaps[mode .. ":" .. lhs] = {
+      mode = mode,
+      lhs = lhs,
+      rhs = rhs,
+      opts = opts or {}
+    }
+  end
+end
+
+-- Create loop/async operations mock
+function M.create_loop_mock()
+  return {
+    new_timer = function()
+      local timer_id = math.random(1000, 9999)
+      test_state.mock_timers[timer_id] = {
+        running = false,
+        callback = nil
+      }
+      
+      return {
+        start = function(timeout, repeat_, callback)
+          test_state.mock_timers[timer_id].running = true
+          test_state.mock_timers[timer_id].callback = callback
+          -- Simulate immediate execution for tests
+          if callback then callback() end
+        end,
+        
+        stop = function()
+          test_state.mock_timers[timer_id].running = false
+        end,
+        
+        close = function()
+          test_state.mock_timers[timer_id] = nil
+        end,
+        
+        _mock_id = timer_id
+      }
+    end,
+    
+    new_fs_event = function()
+      local watcher_id = math.random(1000, 9999)
+      test_state.mock_watchers[watcher_id] = {
+        running = false,
+        path = nil,
+        callback = nil
+      }
+      
+      return {
+        start = function(path, flags, callback)
+          test_state.mock_watchers[watcher_id].running = true
+          test_state.mock_watchers[watcher_id].path = path
+          test_state.mock_watchers[watcher_id].callback = callback
+          return true, nil -- success, no error
+        end,
+        
+        close = function()
+          test_state.mock_watchers[watcher_id] = nil
+        end,
+        
+        _mock_id = watcher_id
+      }
+    end,
+    
+    fs_stat = function(path)
+      -- Mock file stats
+      return {
+        type = "file",
+        size = 1024,
+        mtime = { sec = os.time() }
+      }
+    end,
+    
+    now = function()
+      return os.time() * 1000 -- Convert to milliseconds
+    end
+  }
+end
+
+-- Enhanced vim mock using the new system
 local vim_mock = {
+  -- Use the new API mock functions
+  api = nil, -- Will be set in setup_vim_mock
+  fn = nil,  -- Will be set in setup_vim_mock
   api = {
     nvim_create_user_command = function() end,
     nvim_create_buf = function() return 1 end,
