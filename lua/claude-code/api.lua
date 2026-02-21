@@ -6,56 +6,80 @@ local M = {}
 -- Internal state
 local active_requests = {}
 
--- Check if Claude CLI is available and authenticated
+-- Check if Claude CLI is available
 local function check_claude_cli()
-  -- First check if claude command exists
+  -- Check if claude command exists
   local handle = io.popen("which claude 2>/dev/null")
   local result = handle:read("*a")
   handle:close()
-  
-  if not result or result == "" then
+
+  if not result or result:gsub("%s+", "") == "" then
     return false
   end
-  
-  -- Check if claude is authenticated by testing auth status
-  local auth_handle = io.popen("claude auth status 2>/dev/null")
-  local auth_result = auth_handle:read("*a")
-  auth_handle:close()
-  
-  -- If auth status command succeeds and doesn't contain "not authenticated"
-  return auth_result and not auth_result:match("not authenticated")
+
+  -- Verify it runs by checking version (lightweight check)
+  local ver_handle = io.popen("claude --version 2>/dev/null")
+  local ver_result = ver_handle:read("*a")
+  ver_handle:close()
+
+  return ver_result ~= nil and ver_result ~= ""
 end
 
 -- Claude Code CLI request function (using authenticated CLI)
 local function make_claude_cli_request(prompt, callback)
-  -- Use a more direct approach for Claude CLI
-  local cmd = { "claude", "chat" }
-  
+  -- Use -p (print mode) for non-interactive usage
+  local cmd = { "claude", "-p" }
+
   -- Create unique request ID
   local request_id = tostring(os.time()) .. math.random(1000, 9999)
-  
+
+  local stdout_data = {}
+  local stderr_data = {}
+  local callback_called = false
+
+  -- Ensure callback is only called once
+  local function safe_callback(response, err)
+    if callback_called then return end
+    callback_called = true
+    vim.schedule(function()
+      callback(response, err)
+    end)
+  end
+
   local job_id = vim.fn.jobstart(cmd, {
     stdin = "pipe",
     stdout_buffered = true,
     stderr_buffered = true,
     on_exit = function(_, exit_code)
       active_requests[request_id] = nil
-      if exit_code ~= 0 then
-        callback(nil, "Claude CLI failed with exit code: " .. exit_code .. ". Make sure you're authenticated with 'claude auth login'")
-      end
-    end,
-    on_stdout = function(_, data)
-      if data and #data > 0 then
-        local response_text = table.concat(data, "\n")
-        if response_text and response_text ~= "" then
-          callback(response_text, nil)
+
+      local response = table.concat(stdout_data, "\n")
+      -- Trim trailing whitespace from buffered output
+      response = response:gsub("%s+$", "")
+
+      if exit_code == 0 then
+        if response ~= "" then
+          safe_callback(response, nil)
+        else
+          safe_callback(nil, "Claude CLI returned empty response")
+        end
+      else
+        local error_msg = table.concat(stderr_data, "\n"):gsub("%s+$", "")
+        if error_msg ~= "" then
+          safe_callback(nil, "Claude CLI error: " .. error_msg)
+        else
+          safe_callback(nil, "Claude CLI failed (exit code: " .. exit_code .. "). Make sure you're authenticated with 'claude auth login'")
         end
       end
     end,
+    on_stdout = function(_, data)
+      if data then
+        vim.list_extend(stdout_data, data)
+      end
+    end,
     on_stderr = function(_, data)
-      if data and #data > 0 then
-        local error_text = table.concat(data, "\n")
-        callback(nil, "Claude CLI error: " .. error_text)
+      if data then
+        vim.list_extend(stderr_data, data)
       end
     end,
   })
@@ -76,62 +100,89 @@ end
 -- HTTP request function (fallback for API key users)
 local function make_http_request(url, headers, body, callback)
   local cmd = { "curl", "-s", "-X", "POST" }
-  
+
   -- Add headers
   for key, value in pairs(headers) do
     table.insert(cmd, "-H")
     table.insert(cmd, key .. ": " .. value)
   end
-  
+
   -- Add body
   if body then
     table.insert(cmd, "-d")
     table.insert(cmd, body)
   end
-  
+
   -- Add URL
   table.insert(cmd, url)
-  
+
   -- Create unique request ID
   local request_id = tostring(os.time()) .. math.random(1000, 9999)
-  
+
+  local stdout_data = {}
+  local stderr_data = {}
+  local callback_called = false
+
+  local function safe_callback(response, err)
+    if callback_called then return end
+    callback_called = true
+    vim.schedule(function()
+      callback(response, err)
+    end)
+  end
+
   local job_id = vim.fn.jobstart(cmd, {
     stdout_buffered = true,
     stderr_buffered = true,
     on_exit = function(_, exit_code)
       active_requests[request_id] = nil
+
       if exit_code ~= 0 then
-        callback(nil, "HTTP request failed with exit code: " .. exit_code)
+        local error_msg = table.concat(stderr_data, "\n"):gsub("%s+$", "")
+        safe_callback(nil, "HTTP request failed (exit code: " .. exit_code .. ")" ..
+          (error_msg ~= "" and ": " .. error_msg or ""))
+        return
+      end
+
+      local response_text = table.concat(stdout_data, "\n"):gsub("%s+$", "")
+      if response_text == "" then
+        safe_callback(nil, "Empty HTTP response")
+        return
+      end
+
+      local success, result = pcall(vim.json.decode, response_text)
+      if not success then
+        safe_callback(nil, "Failed to parse JSON response")
+        return
+      end
+
+      -- Check for API error response
+      if result.error then
+        safe_callback(nil, "API error: " .. (result.error.message or vim.json.encode(result.error)))
+        return
+      end
+
+      -- Extract content from Anthropic API response
+      if result.content and #result.content > 0 then
+        local content = ""
+        for _, block in ipairs(result.content) do
+          if block.type == "text" then
+            content = content .. block.text
+          end
+        end
+        safe_callback(content, nil)
+      else
+        safe_callback(nil, "No content in API response")
       end
     end,
     on_stdout = function(_, data)
-      if data and #data > 0 then
-        local response_text = table.concat(data, "\n")
-        if response_text and response_text ~= "" then
-          local success, result = pcall(vim.json.decode, response_text)
-          if success then
-            -- Extract content from Anthropic API response
-            if result.content and #result.content > 0 then
-              local content = ""
-              for _, block in ipairs(result.content) do
-                if block.type == "text" then
-                  content = content .. block.text
-                end
-              end
-              callback(content, nil)
-            else
-              callback(nil, "No content in API response")
-            end
-          else
-            callback(nil, "Failed to parse JSON response: " .. result)
-          end
-        end
+      if data then
+        vim.list_extend(stdout_data, data)
       end
     end,
     on_stderr = function(_, data)
-      if data and #data > 0 then
-        local error_text = table.concat(data, "\n")
-        callback(nil, "HTTP error: " .. error_text)
+      if data then
+        vim.list_extend(stderr_data, data)
       end
     end,
   })
@@ -475,11 +526,11 @@ function M.check_auth_status()
   
   if use_cli then
     local cli_available = check_claude_cli()
-    return { 
-      method = "cli", 
-      available = cli_available, 
-      status = cli_available and "✅ Claude CLI authenticated and ready" or 
-               "❌ Claude CLI not available. Run 'claude auth login' to authenticate."
+    return {
+      method = "cli",
+      available = cli_available,
+      status = cli_available and "Claude CLI available and ready" or
+               "Claude CLI not available. Install with 'npm install -g @anthropic-ai/claude-code' and authenticate."
     }
   else
     local has_key = cfg.api.key ~= nil and cfg.api.key ~= ""

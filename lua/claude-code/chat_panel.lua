@@ -32,7 +32,7 @@ local default_config = {
   auto_input = true, -- Auto-enter input mode
   show_context_info = true,
   max_history = 50,
-  input_height = 3, -- Compact input height matching main panel
+  input_height = 1, -- Single-line input
   smart_resize = true,
   modern_ui = {
     enabled = true,
@@ -193,44 +193,50 @@ function M.open()
   -- Store previous window for navigation
   panel_state.previous_win = vim.api.nvim_get_current_win()
   
-  -- Calculate dimensions with better proportions
+  -- Calculate dimensions accounting for window borders (each border adds 2 rows)
   local width = M.config.width
-  local total_height = vim.o.lines - vim.o.cmdheight - 2
-  local input_height = math.min(M.config.input_height, 3) -- Cap input height to 3 lines max
-  local main_height = total_height - input_height - 1
-  local col = M.config.position == "right" and (vim.o.columns - width) or 0
-  
+  local available_height = vim.o.lines - vim.o.cmdheight - 1
+  local input_height = M.config.input_height
+  -- Both windows have borders: main (height+2) + input (height+2)
+  local main_height = math.max(5, available_height - input_height - 4)
+  local col = M.config.position == "right" and (vim.o.columns - width - 2) or 0
+
+  -- Store dimensions for input window to ensure exact match
+  local window_config = {
+    width = width,
+    col = col,
+    style = "minimal",
+    border = M.config.modern_ui.enabled and "rounded" or "single",
+  }
+
   -- Create main chat buffer and window
   panel_state.main_buf = vim.api.nvim_create_buf(false, true)
   M.setup_main_buffer()
-  
-  panel_state.main_win = vim.api.nvim_open_win(panel_state.main_buf, false, {
+
+  -- Create main window with shared config
+  local main_config = vim.tbl_extend("force", window_config, {
     relative = "editor",
-    width = width,
     height = main_height,
     row = 0,
-    col = col,
-    style = "minimal",
-    border = M.config.modern_ui.enabled and "rounded" or "single",
     title = M.get_panel_title(),
     title_pos = "center",
   })
-  
+  panel_state.main_win = vim.api.nvim_open_win(panel_state.main_buf, false, main_config)
+
   -- Create persistent input buffer and window
   panel_state.input_buf = vim.api.nvim_create_buf(false, true)
   M.setup_input_buffer()
-  
-  panel_state.input_win = vim.api.nvim_open_win(panel_state.input_buf, M.config.auto_input, {
+
+  -- Place input window right below the main window's bottom border
+  local input_row = main_height + 2
+  local input_config = vim.tbl_extend("force", window_config, {
     relative = "editor",
-    width = width,
     height = input_height,
-    row = main_height + 1,
-    col = col,
-    style = "minimal",
-    border = M.config.modern_ui.enabled and "rounded" or "single",
+    row = input_row,
     title = " " .. M.config.modern_ui.icons.input .. " Input ",
     title_pos = "center",
   })
+  panel_state.input_win = vim.api.nvim_open_win(panel_state.input_buf, M.config.auto_input, input_config)
   
   -- Setup window options
   M.setup_window_options()
