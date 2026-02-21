@@ -32,7 +32,7 @@ local default_config = {
   auto_input = true, -- Auto-enter input mode
   show_context_info = true,
   max_history = 50,
-  input_height = 3,
+  input_height = 5, -- Increased for better visibility but still compact
   smart_resize = true,
   modern_ui = {
     enabled = true,
@@ -182,16 +182,21 @@ end
 -- Open the modern chat panel with auto-input
 function M.open()
   if panel_state.is_open then
+    -- If already open, just focus the input
+    M.focus_input()
     return
   end
+  
+  -- Clean up any existing buffers from previous sessions
+  M.cleanup_buffers()
   
   -- Store previous window for navigation
   panel_state.previous_win = vim.api.nvim_get_current_win()
   
-  -- Calculate dimensions
+  -- Calculate dimensions with better proportions
   local width = M.config.width
   local total_height = vim.o.lines - vim.o.cmdheight - 2
-  local input_height = M.config.input_height
+  local input_height = math.min(M.config.input_height, 5) -- Cap input height
   local main_height = total_height - input_height - 1
   local col = M.config.position == "right" and (vim.o.columns - width) or 0
   
@@ -223,8 +228,8 @@ function M.open()
     col = col,
     style = "minimal",
     border = M.config.modern_ui.enabled and "rounded" or "single",
-    title = M.config.modern_ui.icons.input .. " Message",
-    title_pos = "left",
+    title = " " .. M.config.modern_ui.icons.input .. " Input ",
+    title_pos = "center",
   })
   
   -- Setup window options
@@ -304,6 +309,8 @@ function M.setup_window_options()
     vim.api.nvim_win_set_option(panel_state.main_win, "cursorline", false)
     vim.api.nvim_win_set_option(panel_state.main_win, "number", false)
     vim.api.nvim_win_set_option(panel_state.main_win, "relativenumber", false)
+    vim.api.nvim_win_set_option(panel_state.main_win, "signcolumn", "no")
+    vim.api.nvim_win_set_option(panel_state.main_win, "foldcolumn", "0")
   end
   
   -- Input window options
@@ -312,6 +319,8 @@ function M.setup_window_options()
     vim.api.nvim_win_set_option(panel_state.input_win, "cursorline", true)
     vim.api.nvim_win_set_option(panel_state.input_win, "number", false)
     vim.api.nvim_win_set_option(panel_state.input_win, "relativenumber", false)
+    vim.api.nvim_win_set_option(panel_state.input_win, "signcolumn", "no")
+    vim.api.nvim_win_set_option(panel_state.input_win, "foldcolumn", "0")
   end
 end
 
@@ -421,7 +430,7 @@ end
 
 -- Handle auto-focus on panel open
 function M.handle_auto_focus()
-  vim.schedule(function()
+  local function do_focus()
     if M.config.navigation.focus_on_open == "input" then
       M.focus_input()
     elseif M.config.navigation.focus_on_open == "panel" then
@@ -432,7 +441,13 @@ function M.handle_auto_focus()
         vim.api.nvim_set_current_win(panel_state.previous_win)
       end
     end
-  end)
+  end
+  
+  if vim.schedule then
+    vim.schedule(do_focus)
+  else
+    do_focus()
+  end
 end
 
 -- Adjust main editor layout
@@ -607,7 +622,7 @@ function M.update_context()
   
   -- Find the main editor window (not the panel)
   for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if win ~= panel_state.win_id and win ~= panel_state.input_win then
+    if win ~= panel_state.main_win and win ~= panel_state.input_win then
       local buf = vim.api.nvim_win_get_buf(win)
       local buf_name = vim.api.nvim_buf_get_name(buf)
       local buf_type = vim.api.nvim_buf_get_option(buf, "buftype")
@@ -746,33 +761,43 @@ function M.apply_syntax_highlighting()
     return
   end
   
+  -- Check if namespace functions are available (for compatibility)
+  if not vim.api.nvim_create_namespace then
+    return
+  end
+  
   local ns = vim.api.nvim_create_namespace("claude_chat_hl")
-  vim.api.nvim_buf_clear_namespace(panel_state.main_buf, ns, 0, -1)
+  if vim.api.nvim_buf_clear_namespace then
+    vim.api.nvim_buf_clear_namespace(panel_state.main_buf, ns, 0, -1)
+  end
   
   local lines = vim.api.nvim_buf_get_lines(panel_state.main_buf, 0, -1, false)
   
   for i, line in ipairs(lines) do
     local line_num = i - 1
     
-    -- Highlight headers and borders
-    if line:match("^[╭├╰┌└].*[╮┤╯┐┘]$") then
-      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.border, line_num, 0, -1)
-    
-    -- Highlight user messages
-    elseif line:match("^│.*" .. M.config.modern_ui.icons.user) or line:match("^┌.*" .. M.config.modern_ui.icons.user) then
-      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.user_message, line_num, 0, -1)
-    
-    -- Highlight Claude messages
-    elseif line:match("^│.*" .. M.config.modern_ui.icons.claude) or line:match("^┌.*" .. M.config.modern_ui.icons.claude) then
-      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.claude_message, line_num, 0, -1)
-    
-    -- Highlight loading messages
-    elseif line:match(M.config.modern_ui.icons.loading) then
-      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.loading, line_num, 0, -1)
-    
-    -- Highlight error messages
-    elseif line:match(M.config.modern_ui.icons.error) then
-      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.error, line_num, 0, -1)
+    -- Only apply highlighting if the function is available
+    if vim.api.nvim_buf_add_highlight then
+      -- Highlight headers and borders
+      if line:match("^[╭├╰┌└].*[╮┤╯┐┘]$") then
+        vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.border, line_num, 0, -1)
+      
+      -- Highlight user messages
+      elseif line:match("^│.*" .. M.config.modern_ui.icons.user) or line:match("^┌.*" .. M.config.modern_ui.icons.user) then
+        vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.user_message, line_num, 0, -1)
+      
+      -- Highlight Claude messages
+      elseif line:match("^│.*" .. M.config.modern_ui.icons.claude) or line:match("^┌.*" .. M.config.modern_ui.icons.claude) then
+        vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.claude_message, line_num, 0, -1)
+      
+      -- Highlight loading messages
+      elseif line:match(M.config.modern_ui.icons.loading) then
+        vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.loading, line_num, 0, -1)
+      
+      -- Highlight error messages
+      elseif line:match(M.config.modern_ui.icons.error) then
+        vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.error, line_num, 0, -1)
+      end
     end
   end
 end
@@ -780,7 +805,14 @@ end
 -- Utility function to scroll to bottom
 function M.scroll_to_bottom()
   if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
-    local line_count = vim.api.nvim_buf_line_count(panel_state.main_buf)
+    -- Use fallback if nvim_buf_line_count is not available
+    local line_count
+    if vim.api.nvim_buf_line_count then
+      line_count = vim.api.nvim_buf_line_count(panel_state.main_buf)
+    else
+      local lines = vim.api.nvim_buf_get_lines(panel_state.main_buf, 0, -1, false)
+      line_count = #lines
+    end
     vim.api.nvim_win_set_cursor(panel_state.main_win, {line_count, 0})
   end
 end
@@ -816,7 +848,7 @@ function M.clear_input()
   end
 end
 
--- Enhanced send message function
+-- Send message to Claude
 function M.send_message()
   if not panel_state.input_buf or not vim.api.nvim_buf_is_valid(panel_state.input_buf) then
     return
@@ -926,9 +958,15 @@ function M.send_message()
       
       -- Auto-focus input for next message if enabled
       if M.config.auto_input and M.config.navigation.focus_on_open == "input" then
-        vim.schedule(function()
+        local function focus_input()
           M.focus_input()
-        end)
+        end
+        
+        if vim.schedule then
+          vim.schedule(focus_input)
+        else
+          focus_input()
+        end
       end
     end)
   end)
@@ -946,117 +984,6 @@ function M.send_message()
   end
   
   if not result then
-    panel_state.loading = false
-    local last_entry = panel_state.chat_history[#panel_state.chat_history]
-    if last_entry then
-      last_entry.loading = false
-      last_entry.error = "Failed to start request"
-    end
-    M.refresh_display()
-    vim.notify("Claude Code Chat: Failed to initiate request", vim.log.levels.ERROR)
-  end
-end
-
--- Send message to Claude
-function M.send_message()
-  if not panel_state.input_buf or not vim.api.nvim_buf_is_valid(panel_state.input_buf) then
-    return
-  end
-  
-  -- Get message from input buffer
-  local lines = vim.api.nvim_buf_get_lines(panel_state.input_buf, 0, -1, false)
-  local message = utils.string.trim(table.concat(lines, "\n"):gsub("^💬 Message: ", ""))
-  
-  if message == "" then
-    M.close_input()
-    return
-  end
-  
-  -- Add to chat history
-  local entry = {
-    user_message = message,
-    loading = true,
-    timestamp = os.time(),
-  }
-  
-  table.insert(panel_state.chat_history, entry)
-  
-  -- Limit history size
-  if #panel_state.chat_history > M.config.max_history then
-    table.remove(panel_state.chat_history, 1)
-  end
-  
-  -- Close input and refresh
-  M.close_input()
-  M.refresh_display()
-  
-  -- Update context before sending
-  M.update_context()
-  
-  -- Check API status before sending
-  local api_status = M.check_api_status()
-  if not api_status.available then
-    local last_entry = panel_state.chat_history[#panel_state.chat_history]
-    if last_entry then
-      last_entry.loading = false
-      last_entry.error = "API not available: " .. api_status.status
-    end
-    M.refresh_display()
-    vim.notify("Claude Code Chat: " .. api_status.status, vim.log.levels.ERROR)
-    return
-  end
-  
-  -- Send to Claude API
-  panel_state.loading = true
-  
-  -- Add some debugging info
-  local debug_info = {
-    message = message,
-    context_file = panel_state.current_context and panel_state.current_context.filename or "none",
-    timestamp = os.time()
-  }
-  
-  local request_id
-  local success, result = pcall(function()
-    return api.request(message, panel_state.current_context, function(response, error)
-      panel_state.loading = false
-      
-      -- Update the last entry
-      local last_entry = panel_state.chat_history[#panel_state.chat_history]
-      if last_entry then
-        last_entry.loading = false
-        if error then
-          last_entry.error = tostring(error)
-          vim.notify("Claude Code Chat: " .. tostring(error), vim.log.levels.ERROR)
-        elseif response then
-          last_entry.response = tostring(response)
-        else
-          last_entry.error = "Empty response from API"
-          vim.notify("Claude Code Chat: Received empty response", vim.log.levels.WARN)
-        end
-      end
-      
-      -- Refresh display
-      M.refresh_display()
-    end)
-  end)
-  
-  if success then
-    request_id = result
-  else
-    panel_state.loading = false
-    local last_entry = panel_state.chat_history[#panel_state.chat_history]
-    if last_entry then
-      last_entry.loading = false
-      last_entry.error = "API call failed: " .. tostring(result)
-    end
-    M.refresh_display()
-    vim.notify("Claude Code Chat: Failed to call API - " .. tostring(result), vim.log.levels.ERROR)
-    return
-  end
-  
-  -- Handle API request failure
-  if not request_id then
     panel_state.loading = false
     local last_entry = panel_state.chat_history[#panel_state.chat_history]
     if last_entry then
@@ -1104,6 +1031,25 @@ function M.show_api_status()
   
   vim.notify("Claude Code: " .. message, status.available and vim.log.levels.INFO or vim.log.levels.WARN)
   return status.available
+end
+
+-- Clean up existing buffers to prevent duplicates
+function M.cleanup_buffers()
+  -- Clean up main buffer if it exists but is not being used
+  if panel_state.main_buf and vim.api.nvim_buf_is_valid(panel_state.main_buf) then
+    if not panel_state.is_open then
+      vim.api.nvim_buf_delete(panel_state.main_buf, { force = true })
+      panel_state.main_buf = nil
+    end
+  end
+  
+  -- Clean up input buffer if it exists but is not being used
+  if panel_state.input_buf and vim.api.nvim_buf_is_valid(panel_state.input_buf) then
+    if not panel_state.is_open then
+      vim.api.nvim_buf_delete(panel_state.input_buf, { force = true })
+      panel_state.input_buf = nil
+    end
+  end
 end
 
 -- Enhanced cleanup function
