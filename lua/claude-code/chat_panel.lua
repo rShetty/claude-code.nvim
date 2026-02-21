@@ -32,7 +32,7 @@ local default_config = {
   auto_input = true, -- Auto-enter input mode
   show_context_info = true,
   max_history = 50,
-  input_height = 5, -- Increased for better visibility but still compact
+  input_height = 3, -- Compact input height matching main panel
   smart_resize = true,
   modern_ui = {
     enabled = true,
@@ -196,7 +196,7 @@ function M.open()
   -- Calculate dimensions with better proportions
   local width = M.config.width
   local total_height = vim.o.lines - vim.o.cmdheight - 2
-  local input_height = math.min(M.config.input_height, 5) -- Cap input height
+  local input_height = math.min(M.config.input_height, 3) -- Cap input height to 3 lines max
   local main_height = total_height - input_height - 1
   local col = M.config.position == "right" and (vim.o.columns - width) or 0
   

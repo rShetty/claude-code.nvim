@@ -53,6 +53,16 @@ local function create_mock_vim()
     log = { levels = { INFO = 1, ERROR = 2, WARN = 3 } },
     defer_fn = function(fn, delay) fn() end,
     schedule = function(fn) fn() end,
+    schedule_wrap = function(fn) return fn end,
+    loop = {
+      new_timer = function() 
+        return {
+          start = function() end, 
+          stop = function() end, 
+          close = function() end
+        } 
+      end
+    },
     json = {
       encode = function(data) return "mock-json" end,
       decode = function(str) return {content = {{type = "text", text = "Mock response"}}} end,
@@ -65,6 +75,15 @@ local function run_diagnostic()
   _G.vim = create_mock_vim()
   
   -- Mock dependencies
+  local utils_mock = {
+    string = {
+      trim = function(str)
+        if not str then return "" end
+        return str:match("^%s*(.-)%s*$") or ""
+      end
+    }
+  }
+  
   local config_mock = {
     get = function()
       return {
@@ -141,10 +160,10 @@ local function run_diagnostic()
   package.loaded["claude-code.config"] = config_mock
   package.loaded["claude-code.api"] = api_mock
   package.loaded["claude-code.ui"] = ui_mock
+  package.loaded["claude-code.utils"] = utils_mock
   
   print("1. Loading utils module...")
-  local utils = dofile("lua/claude-code/utils.lua")
-  print("✅ Utils loaded")
+  print("✅ Utils mocked")
   
   print("2. Loading chat panel module...")
   local chat_panel = dofile("lua/claude-code/chat_panel.lua")
@@ -163,7 +182,7 @@ local function run_diagnostic()
   -- Simulate the exact flow that happens when sending a message
   local test_message_raw = "💬 Message: hello from debug test"
   local processed_message = test_message_raw:gsub("^💬 Message: ", "")
-  local trimmed_message = utils.string.trim(processed_message)
+  local trimmed_message = utils_mock.string.trim(processed_message)
   
   print("   Raw message:", "'" .. test_message_raw .. "'")
   print("   Processed message:", "'" .. processed_message .. "'")

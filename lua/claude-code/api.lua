@@ -8,15 +8,28 @@ local active_requests = {}
 
 -- Check if Claude CLI is available and authenticated
 local function check_claude_cli()
-  local handle = io.popen("claude --version 2>/dev/null")
+  -- First check if claude command exists
+  local handle = io.popen("which claude 2>/dev/null")
   local result = handle:read("*a")
   handle:close()
-  return result and result ~= ""
+  
+  if not result or result == "" then
+    return false
+  end
+  
+  -- Check if claude is authenticated by testing auth status
+  local auth_handle = io.popen("claude auth status 2>/dev/null")
+  local auth_result = auth_handle:read("*a")
+  auth_handle:close()
+  
+  -- If auth status command succeeds and doesn't contain "not authenticated"
+  return auth_result and not auth_result:match("not authenticated")
 end
 
 -- Claude Code CLI request function (using authenticated CLI)
 local function make_claude_cli_request(prompt, callback)
-  local cmd = { "claude" }
+  -- Use a more direct approach for Claude CLI
+  local cmd = { "claude", "chat" }
   
   -- Create unique request ID
   local request_id = tostring(os.time()) .. math.random(1000, 9999)
@@ -28,7 +41,7 @@ local function make_claude_cli_request(prompt, callback)
     on_exit = function(_, exit_code)
       active_requests[request_id] = nil
       if exit_code ~= 0 then
-        callback(nil, "Claude CLI failed with exit code: " .. exit_code)
+        callback(nil, "Claude CLI failed with exit code: " .. exit_code .. ". Make sure you're authenticated with 'claude auth login'")
       end
     end,
     on_stdout = function(_, data)
@@ -216,7 +229,11 @@ function M.request(prompt, context, callback)
   else
     -- Use HTTP API
     if not cfg.api.key then
-      callback(nil, "No API key configured and Claude CLI not available. Please set ANTHROPIC_API_KEY or install Claude CLI.")
+      callback(nil, "❌ No API key configured and Claude CLI not available.\n\n" ..
+               "Options to fix:\n" ..
+               "1. Set ANTHROPIC_API_KEY environment variable\n" ..
+               "2. Install Claude CLI: 'npm install -g @anthropic-ai/claude-3-cli'\n" ..
+               "3. Authenticate CLI: 'claude auth login'")
       return nil
     end
     
@@ -457,16 +474,20 @@ function M.check_auth_status()
   end
   
   if use_cli then
+    local cli_available = check_claude_cli()
     return { 
       method = "cli", 
-      available = check_claude_cli(), 
-      status = check_claude_cli() and "✅ Claude CLI authenticated" or "❌ Claude CLI not available" 
+      available = cli_available, 
+      status = cli_available and "✅ Claude CLI authenticated and ready" or 
+               "❌ Claude CLI not available. Run 'claude auth login' to authenticate."
     }
   else
+    local has_key = cfg.api.key ~= nil and cfg.api.key ~= ""
     return { 
       method = "api", 
-      available = cfg.api.key ~= nil, 
-      status = cfg.api.key and "✅ API key configured" or "❌ API key not configured" 
+      available = has_key, 
+      status = has_key and "✅ API key configured and ready" or 
+               "❌ API key not configured. Set ANTHROPIC_API_KEY environment variable."
     }
   end
 end
