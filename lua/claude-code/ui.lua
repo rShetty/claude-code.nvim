@@ -1,5 +1,5 @@
 -- UI system for Claude Code Neovim plugin
-local config = require("claudeai.config")
+local config = require("claude-code.config")
 local M = {}
 
 -- Internal state

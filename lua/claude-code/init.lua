@@ -1,8 +1,8 @@
 -- Claude Code Neovim Plugin
 -- Main initialization and command registration
-local config = require("claudeai.config")
-local api = require("claudeai.api")
-local ui = require("claudeai.ui")
+local config = require("claude-code.config")
+local api = require("claude-code.api")
+local ui = require("claude-code.ui")
 
 local M = {}
 
@@ -390,7 +390,7 @@ Leader key combinations (configurable):
 Set ANTHROPIC_API_KEY environment variable or configure in setup:
 
 ```lua
-require("claudeai").setup({
+require("claude-code").setup({
   api = {
     key = "your-api-key-here"
   }

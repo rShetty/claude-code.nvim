@@ -1,6 +1,6 @@
 -- Claude Code API client for Neovim plugin
 -- Supports both Claude CLI (authenticated) and HTTP API (with key)
-local config = require("claudeai.config")
+local config = require("claude-code.config")
 local M = {}
 
 -- Internal state

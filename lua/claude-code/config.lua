@@ -1,4 +1,4 @@
--- Configuration module for Claude Code Neovim plugin
+-- Configuration module for Claude Code Neovim Plugin
 local M = {}
 
 -- Default configuration for Claude Code
@@ -122,7 +122,7 @@ M.defaults = {
   logging = {
     enabled = false, -- Enable logging for debugging
     level = "info", -- Log level: debug, info, warn, error
-    file = vim.fn.stdpath("cache") .. "/claudeai.log", -- Log file path
+    file = vim.fn.stdpath("cache") .. "/claude-code.log", -- Log file path
   },
 
   -- Claude Code specific prompts

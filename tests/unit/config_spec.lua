@@ -1,18 +1,18 @@
--- Unit tests for claudeai.config module
+-- Unit tests for claude-code.config module
 local helpers = require('tests.helpers')
 
-describe("claudeai.config", function()
+describe("claude-code.config", function()
   local config
   
   before_each(function()
     helpers.setup_vim_mock()
     -- Reset package cache to get fresh module
-    package.loaded['claudeai.config'] = nil
-    config = require('claudeai.config')
+    package.loaded['claude-code.config'] = nil
+    config = require('claude-code.config')
   end)
   
   after_each(function()
-    package.loaded['claudeai.config'] = nil
+    package.loaded['claude-code.config'] = nil
   end)
 
   describe("defaults", function()

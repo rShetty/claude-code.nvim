@@ -61,12 +61,12 @@ A **comprehensive Neovim plugin** that transforms your coding experience with Cl
 
 1. **Install** the plugin using your favorite package manager
 2. **Set your API key**: `export ANTHROPIC_API_KEY="your-key"`
-3. **Configure** the plugin: `require('claudeai').setup({})`
+3. **Configure** the plugin: `require('claude-code').setup({})`
 4. **Start coding** with AI assistance!
 
 ```lua
 -- Minimal setup
-require('claudeai').setup({
+require('claude-code').setup({
   api = { key = vim.env.ANTHROPIC_API_KEY }
 })
 ```
@@ -90,7 +90,7 @@ require('claudeai').setup({
     "nvim-lua/plenary.nvim", -- Required for async operations
   },
   config = function()
-    require('claudeai').setup({
+    require('claude-code').setup({
       api = {
         key = vim.env.ANTHROPIC_API_KEY, -- Secure: use environment variable
         model = "claude-3-5-sonnet-20241022", -- Latest model
@@ -109,9 +109,9 @@ require('claudeai').setup({
 
 ```lua
 use {
-  'claudeai.nvim',
+  'claude-code.nvim',
   config = function()
-    require('claudeai').setup({
+    require('claude-code').setup({
       api = {
         key = vim.env.ANTHROPIC_API_KEY,
       }
@@ -123,13 +123,13 @@ use {
 ### Using [vim-plug](https://github.com/junegunn/vim-plug)
 
 ```vim
-Plug 'claudeai.nvim'
+Plug 'claude-code.nvim'
 ```
 
 Then in your `init.lua`:
 
 ```lua
-require('claudeai').setup({
+require('claude-code').setup({
   api = {
     key = vim.env.ANTHROPIC_API_KEY,
   }
@@ -140,29 +140,51 @@ require('claudeai').setup({
 
 ### API Setup
 
-First, set your Anthropic API key:
+#### Getting Your Anthropic API Key
+
+1. **Sign up** at [Anthropic Console](https://console.anthropic.com/)
+2. **Navigate** to API Keys section
+3. **Create** a new API key
+4. **Copy** your key (starts with `sk-ant-api03-...`)
+
+#### Set Your API Key (Recommended - Environment Variable)
 
 ```bash
-export ANTHROPIC_API_KEY="your-api-key-here"
+# Add to your ~/.zshrc or ~/.bashrc
+export ANTHROPIC_API_KEY="sk-ant-api03-your-key-here"
+
+# Reload your shell
+source ~/.zshrc
 ```
 
-Or configure it directly:
+#### Or Configure Directly in Setup
 
 ```lua
-require('claudeai').setup({
+require('claude-code').setup({
   api = {
-    key = "your-api-key-here",
+    key = "sk-ant-api03-your-key-here", -- Your actual API key
     model = "claude-3-5-sonnet-20241022", -- Latest Claude 3.5 Sonnet
-    max_tokens = 4096,
-    temperature = 0.1, -- Lower for more deterministic code
+    max_tokens = 8192, -- Maximum tokens (Claude 3.5 limit)
+    temperature = 0.1, -- Lower for more deterministic code generation
+    base_url = "https://api.anthropic.com/v1", -- Anthropic API endpoint
   }
 })
 ```
 
+#### Supported Models (as of Feb 2026)
+
+| Model | ID | Context Window | Best For |
+|-------|----|--------------|---------|
+| **Claude 3.5 Sonnet** | `claude-3-5-sonnet-20241022` | 200K tokens | **Recommended** - Best balance of intelligence and speed |
+| **Claude 3.5 Haiku** | `claude-3-5-haiku-20241022` | 200K tokens | Fastest responses, good for simple tasks |
+| **Claude 3 Opus** | `claude-3-opus-20240229` | 200K tokens | Most capable, best for complex reasoning |
+
+> **💡 Tip**: Claude 3.5 Sonnet is recommended for most coding tasks as it provides excellent code quality with fast response times.
+
 ### Feature Configuration
 
 ```lua
-require('claudeai').setup({
+require('claude-code').setup({
   features = {
     completion = {
       enabled = true,
@@ -207,7 +229,7 @@ require('claudeai').setup({
 ### UI Customization
 
 ```lua
-require('claudeai').setup({
+require('claude-code').setup({
   ui = {
     float_border = "rounded", -- "none", "single", "double", "rounded", "solid", "shadow"
     float_width = 0.8,
@@ -221,7 +243,7 @@ require('claudeai').setup({
 ### Custom Keybindings
 
 ```lua
-require('claudeai').setup({
+require('claude-code').setup({
   keymaps = {
     commands = {
       -- Code writing
@@ -361,16 +383,27 @@ require('claudeai').setup({
 ## 🔧 Troubleshooting
 
 ### API Key Issues
+
 ```bash
-# Check if API key is set
+# Check if API key is set and valid format
 echo $ANTHROPIC_API_KEY
+# Should start with: sk-ant-api03-
 
 # Set API key temporarily
-export ANTHROPIC_API_KEY="your-key-here"
+export ANTHROPIC_API_KEY="sk-ant-api03-your-key-here"
 
 # Check plugin status
 :ClaudeStatus
+
+# Test API connection
+:checkhealth claude_code
 ```
+
+**Common API Key Problems:**
+- ❌ **Wrong format**: Ensure key starts with `sk-ant-api03-`
+- ❌ **Expired key**: Check Anthropic Console for key status
+- ❌ **Insufficient credits**: Verify your account has available credits
+- ❌ **Rate limits**: Wait a moment if you're hitting rate limits
 
 ### Performance Issues
 - Reduce `max_context_lines` in completion settings
@@ -394,12 +427,25 @@ export ANTHROPIC_API_KEY="your-key-here"
 ### Security Best Practices
 
 ```bash
-# Store API key securely
-echo 'export ANTHROPIC_API_KEY="sk-..."' >> ~/.zshrc
+# Store API key securely in your shell profile
+echo 'export ANTHROPIC_API_KEY="sk-ant-api03-your-key-here"' >> ~/.zshrc
 
-# Or use a secrets manager
+# Or use a secrets manager (recommended for teams)
 echo 'export ANTHROPIC_API_KEY=$(pass anthropic/api-key)' >> ~/.zshrc
+
+# Or use macOS Keychain
+echo 'export ANTHROPIC_API_KEY=$(security find-generic-password -s "anthropic-api" -w)' >> ~/.zshrc
+
+# For development, use .env files (add to .gitignore!)
+echo 'ANTHROPIC_API_KEY=sk-ant-api03-your-key-here' > .env
+echo '.env' >> .gitignore
 ```
+
+**⚠️ Security Reminders:**
+- 🚫 **Never commit API keys** to version control
+- 🔒 **Use environment variables** instead of hardcoding
+- 🔄 **Rotate keys regularly** for better security
+- 📋 **Monitor usage** in Anthropic Console
 
 ## 🆚 Comparison with Cursor AI
 

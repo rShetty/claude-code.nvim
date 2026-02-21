@@ -48,7 +48,7 @@ This project adheres to a [Code of Conduct](CODE_OF_CONDUCT.md). By participatin
      'your-username/claude-code.nvim',
      dir = '/path/to/your/local/claude-code.nvim',
      config = function()
-       require('claudeai').setup({
+       require('claude-code').setup({
          api = { key = 'your-api-key' }
        })
      end
@@ -145,8 +145,8 @@ Brief description of changes
 
 ```lua
 -- File structure
-local config = require("claudeai.config")
-local api = require("claudeai.api")
+local config = require("claude-code.config")
+local api = require("claude-code.api")
 
 local M = {}
 
@@ -193,9 +193,9 @@ tests/
 ### Writing Tests
 
 ```lua
-describe("claudeai.config", function()
+describe("claude-code.config", function()
   it("should load default configuration", function()
-    local config = require("claudeai.config")
+    local config = require("claude-code.config")
     local defaults = config.get()
     
     assert.is_not_nil(defaults.api)

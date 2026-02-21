@@ -70,7 +70,7 @@ check: lint format-check test ## Run all checks (lint, format, test)
 # Plugin testing in Neovim
 test-plugin: ## Test plugin in minimal Neovim config
 	@echo "Testing plugin with minimal config..."
-	nvim --clean -c "set rtp+=." -c "lua require('claudeai').setup({api = {key = 'test'}})" -c "ClaudeHelp"
+	nvim --clean -c "set rtp+=." -c "lua require('claude-code').setup({api = {key = 'test'}})" -c "ClaudeHelp"
 
 # Release preparation
 prepare-release: check docs ## Prepare for release (run all checks and generate docs)

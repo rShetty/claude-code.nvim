@@ -37,7 +37,7 @@ end
 
 -- Check API configuration
 local function check_api_configuration()
-  local config = require("claudeai.config")
+  local config = require("claude-code.config")
   local cfg = config.get()
   
   -- Check API key
@@ -105,7 +105,7 @@ end
 
 -- Check plugin features
 local function check_plugin_features()
-  local config = require("claudeai.config")
+  local config = require("claude-code.config")
   local cfg = config.get()
   
   local enabled_features = {}
@@ -131,7 +131,7 @@ end
 -- Check for common issues
 local function check_common_issues()
   -- Check if plugin is loaded
-  local ok, _ = pcall(require, "claudeai")
+  local ok, _ = pcall(require, "claude-code")
   if ok then
     vim.health.ok("Plugin loaded successfully")
   else

@@ -1,7 +1,7 @@
--- Unit tests for claudeai.init module
+-- Unit tests for claude-code.init module
 local helpers = require('tests.helpers')
 
-describe("claudeai.init", function()
+describe("claude-code.init", function()
   local init_module
   local mock_config, mock_api, mock_ui
   
@@ -14,21 +14,21 @@ describe("claudeai.init", function()
     mock_ui = helpers.create_mock_ui()
     
     -- Mock the requires
-    package.preload['claudeai.config'] = function() return mock_config end
-    package.preload['claudeai.api'] = function() return mock_api end
-    package.preload['claudeai.ui'] = function() return mock_ui end
+    package.preload['claude-code.config'] = function() return mock_config end
+    package.preload['claude-code.api'] = function() return mock_api end
+    package.preload['claude-code.ui'] = function() return mock_ui end
     
     -- Reset package cache
-    package.loaded['claudeai.init'] = nil
-    init_module = require('claudeai.init')
+    package.loaded['claude-code.init'] = nil
+    init_module = require('claude-code.init')
   end)
   
   after_each(function()
     -- Clean up
-    package.loaded['claudeai.init'] = nil
-    package.preload['claudeai.config'] = nil
-    package.preload['claudeai.api'] = nil  
-    package.preload['claudeai.ui'] = nil
+    package.loaded['claude-code.init'] = nil
+    package.preload['claude-code.config'] = nil
+    package.preload['claude-code.api'] = nil  
+    package.preload['claude-code.ui'] = nil
   end)
 
   describe("setup", function()
