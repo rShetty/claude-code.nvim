@@ -57,6 +57,16 @@ local vim = {
   list_extend = function() end,
 }
 
+-- Mock utils module first
+local utils_mock = {
+  string = {
+    trim = function(str)
+      if not str then return "" end
+      return str:match("^%s*(.-)%s*$") or ""
+    end
+  }
+}
+
 -- Mock modules
 local config_mock = {
   get = function() 
@@ -101,6 +111,7 @@ local api_mock = {
 package.loaded["claude-code.config"] = config_mock
 package.loaded["claude-code.api"] = api_mock  
 package.loaded["claude-code.ui"] = ui_mock
+package.loaded["claude-code.utils"] = utils_mock
 
 -- Set global vim
 _G.vim = vim

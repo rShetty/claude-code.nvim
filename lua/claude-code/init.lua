@@ -3,7 +3,8 @@
 local config = require("claude-code.config")
 local api = require("claude-code.api")
 local ui = require("claude-code.ui")
-
+local git = require("claude-code.git")
+local utils = require("claude-code.utils")
 -- New enhanced modules
 local terminal = require("claude-code.terminal")
 local file_watcher = require("claude-code.file_watcher")
@@ -355,7 +356,7 @@ function M.explain_code(opts)
   local context = ui.get_current_context()
   local code_to_explain = context.selection or context.file_content
   
-  if not code_to_explain or code_to_explain:trim() == "" then
+  if not code_to_explain or utils.string.trim(code_to_explain) == "" then
     ui.show_error("No code selected or file is empty")
     return
   end
@@ -404,7 +405,7 @@ function M.review_code(opts)
   local context = ui.get_current_context()
   local code_to_review = context.selection or context.file_content
   
-  if not code_to_review or code_to_review:trim() == "" then
+  if not code_to_review or utils.string.trim(code_to_review) == "" then
     ui.show_error("No code selected or file is empty")
     return
   end
@@ -427,7 +428,7 @@ end
 function M.review_file()
   local context = ui.get_current_context()
   
-  if not context.file_content or context.file_content:trim() == "" then
+  if not context.file_content or utils.string.trim(context.file_content) == "" then
     ui.show_error("Current file is empty")
     return
   end
@@ -458,7 +459,7 @@ function M.generate_tests(opts)
   local context = ui.get_current_context()
   local code_to_test = context.selection
   
-  if not code_to_test or code_to_test:trim() == "" then
+  if not code_to_test or utils.string.trim(code_to_test) == "" then
     ui.show_error("Please select code to generate tests for")
     return
   end
@@ -482,7 +483,7 @@ end
 -- Open chat interface
 function M.open_chat()
   ui.input_dialog("Ask Claude Code anything", function(input)
-    if input and input:trim() ~= "" then
+    if input and utils.string.trim(input) ~= "" then
       local context = ui.get_current_context()
       local loading_win = ui.show_loading("Claude Code", "Processing query...")
       

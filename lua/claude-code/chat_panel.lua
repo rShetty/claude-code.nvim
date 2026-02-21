@@ -3,6 +3,7 @@
 local config = require("claude-code.config")
 local api = require("claude-code.api")
 local ui = require("claude-code.ui")
+local utils = require("claude-code.utils")
 
 local M = {}
 
@@ -397,7 +398,7 @@ function M.send_message()
   
   -- Get message from input buffer
   local lines = vim.api.nvim_buf_get_lines(panel_state.input_buf, 0, -1, false)
-  local message = table.concat(lines, "\n"):gsub("^💬 Message: ", ""):trim()
+  local message = utils.string.trim(table.concat(lines, "\n"):gsub("^💬 Message: ", ""))
   
   if message == "" then
     M.close_input()
@@ -427,7 +428,8 @@ function M.send_message()
   
   -- Send to Claude API
   panel_state.loading = true
-  api.request(message, panel_state.current_context, function(response, error)
+  
+  local request_id = api.request(message, panel_state.current_context, function(response, error)
     panel_state.loading = false
     
     -- Update the last entry
@@ -435,15 +437,28 @@ function M.send_message()
     if last_entry then
       last_entry.loading = false
       if error then
-        last_entry.error = error
+        last_entry.error = tostring(error)
+        vim.notify("Chat request failed: " .. tostring(error), vim.log.levels.ERROR)
       else
-        last_entry.response = response
+        last_entry.response = tostring(response or "")
       end
     end
     
     -- Refresh display
     M.refresh_display()
   end)
+  
+  -- Handle API request failure
+  if not request_id then
+    panel_state.loading = false
+    local last_entry = panel_state.chat_history[#panel_state.chat_history]
+    if last_entry then
+      last_entry.loading = false
+      last_entry.error = "Failed to start request"
+    end
+    M.refresh_display()
+    vim.notify("Failed to send message to Claude", vim.log.levels.ERROR)
+  end
 end
 
 -- Clear chat history
