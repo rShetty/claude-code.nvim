@@ -170,13 +170,49 @@ M.defaults = {
     width = 50, -- Panel width in columns
     position = "right", -- "left" or "right"
     auto_close = false, -- Auto-close panel after sending message
+    auto_input = true, -- Auto-enter input mode (no need to press 'i')
     show_context_info = true, -- Show file context information
     max_history = 50, -- Maximum number of chat entries to keep
+    input_height = 3, -- Height of input area
+    smart_resize = true, -- Smart window resizing
+    modern_ui = {
+      enabled = true, -- Enable modern UI enhancements
+      animations = true, -- Enable smooth animations
+      icons = {
+        user = "👤",
+        claude = "🤖",
+        loading = "⏳",
+        error = "❌",
+        success = "✅",
+        input = "💬",
+      },
+      colors = {
+        border = "FloatBorder",
+        title = "Title",
+        user_message = "Normal",
+        claude_message = "Comment",
+        input_prompt = "Question",
+        loading = "WarningMsg",
+        error = "ErrorMsg",
+      },
+    },
+    navigation = {
+      enable_window_nav = true, -- Enable Ctrl+w navigation
+      smart_focus = true, -- Smart focus management
+      focus_on_open = "input", -- "input", "panel", or "previous"
+    },
     keymaps = {
       toggle = "<leader>cp", -- Toggle chat panel
-      send = "<CR>", -- Send message in input mode
-      cancel = "<Esc>", -- Cancel input
+      send = "<CR>", -- Send message
+      cancel = "<Esc>", -- Cancel/close
       clear_history = "<leader>cc", -- Clear chat history
+      focus_input = "<C-i>", -- Focus input area
+      focus_panel = "<C-p>", -- Focus chat panel
+      -- Window navigation
+      nav_left = "<C-w>h",
+      nav_right = "<C-w>l",
+      nav_up = "<C-w>k",
+      nav_down = "<C-w>j",
     },
   },
 

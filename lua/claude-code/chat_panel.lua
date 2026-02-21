@@ -1,5 +1,5 @@
--- Chat panel for Claude Code Neovim plugin
--- Provides a persistent sidebar chat interface similar to Cursor
+-- Modern Chat Panel for Claude Code Neovim plugin
+-- Enhanced with smart navigation, auto-input, and modern UI
 local config = require("claude-code.config")
 local api = require("claude-code.api")
 local ui = require("claude-code.ui")
@@ -7,42 +7,81 @@ local utils = require("claude-code.utils")
 
 local M = {}
 
--- Panel state
+-- Enhanced panel state with navigation tracking
 local panel_state = {
   is_open = false,
-  win_id = nil,
-  buf_id = nil,
+  main_win = nil,
+  main_buf = nil,
+  input_win = nil,
+  input_buf = nil,
   chat_history = {},
   current_context = nil,
-  input_mode = false,
-  input_buf = nil,
-  input_win = nil,
   loading = false,
+  previous_win = nil, -- Track previous window for smart navigation
+  input_history = {}, -- Store input history
+  input_history_pos = 0,
+  animation_timer = nil,
+  focus_mode = "input", -- "input" or "panel"
 }
 
--- Configuration defaults
+-- Enhanced configuration with modern UI features
 local default_config = {
   width = 50,
   position = "right", -- "left" or "right"
   auto_close = false,
+  auto_input = true, -- Auto-enter input mode
   show_context_info = true,
   max_history = 50,
+  input_height = 3,
+  smart_resize = true,
+  modern_ui = {
+    enabled = true,
+    animations = true,
+    icons = {
+      user = "👤",
+      claude = "🤖",
+      loading = "⏳",
+      error = "❌",
+      success = "✅",
+      input = "💬",
+    },
+    colors = {
+      border = "FloatBorder",
+      title = "Title",
+      user_message = "Normal",
+      claude_message = "Comment",
+      input_prompt = "Question",
+      loading = "WarningMsg",
+      error = "ErrorMsg",
+    },
+  },
+  navigation = {
+    enable_window_nav = true,
+    smart_focus = true,
+    focus_on_open = "input",
+  },
   keymaps = {
     toggle = "<leader>cp",
     send = "<CR>",
     cancel = "<Esc>",
     clear_history = "<leader>cc",
+    focus_input = "<C-i>",
+    focus_panel = "<C-p>",
+    nav_left = "<C-w>h",
+    nav_right = "<C-w>l",
+    nav_up = "<C-w>k",
+    nav_down = "<C-w>j",
   },
 }
 
--- Setup function
+-- Enhanced setup function
 function M.setup(user_config)
   user_config = user_config or {}
   M.config = vim.tbl_deep_extend("force", default_config, user_config)
   
   -- Register commands
   vim.api.nvim_create_user_command("ClaudeChatPanel", M.toggle, {
-    desc = "Toggle Claude Code chat panel",
+    desc = "Toggle modern Claude Code chat panel",
   })
   
   vim.api.nvim_create_user_command("ClaudeClearHistory", M.clear_history, {
@@ -53,14 +92,61 @@ function M.setup(user_config)
     desc = "Check Claude Code API status",
   })
   
-  -- Setup global keymap
+  vim.api.nvim_create_user_command("ClaudeFocusInput", M.focus_input, {
+    desc = "Focus Claude chat input",
+  })
+  
+  vim.api.nvim_create_user_command("ClaudeFocusPanel", M.focus_panel, {
+    desc = "Focus Claude chat panel",
+  })
+  
+  -- Setup global keymaps
   vim.keymap.set("n", M.config.keymaps.toggle, M.toggle, {
     desc = "Toggle Claude Code chat panel",
     silent = true,
   })
   
+  -- Setup navigation keymaps globally if enabled
+  if M.config.navigation.enable_window_nav then
+    M.setup_global_navigation()
+  end
+  
   -- Setup autocommands for context awareness
   M.setup_autocommands()
+end
+
+-- Setup global navigation overrides
+function M.setup_global_navigation()
+  -- Override default window navigation when panel is active
+  local function create_nav_wrapper(direction)
+    return function()
+      if panel_state.is_open then
+        M.smart_navigate(direction)
+      else
+        vim.cmd("wincmd " .. direction:sub(1,1))
+      end
+    end
+  end
+  
+  -- Only set up global navigation if explicitly enabled
+  if M.config.navigation.enable_window_nav then
+    vim.keymap.set("n", "<C-w>h", create_nav_wrapper("left"), { 
+      desc = "Navigate left (Claude-aware)", 
+      silent = true 
+    })
+    vim.keymap.set("n", "<C-w>l", create_nav_wrapper("right"), { 
+      desc = "Navigate right (Claude-aware)", 
+      silent = true 
+    })
+    vim.keymap.set("n", "<C-w>j", create_nav_wrapper("down"), { 
+      desc = "Navigate down (Claude-aware)", 
+      silent = true 
+    })
+    vim.keymap.set("n", "<C-w>k", create_nav_wrapper("up"), { 
+      desc = "Navigate up (Claude-aware)", 
+      silent = true 
+    })
+  end
 end
 
 -- Setup autocommands for context updates
@@ -93,99 +179,406 @@ function M.toggle()
   end
 end
 
--- Open the chat panel
+-- Open the modern chat panel with auto-input
 function M.open()
   if panel_state.is_open then
     return
   end
   
-  -- Create buffer if it doesn't exist
-  if not panel_state.buf_id or not vim.api.nvim_buf_is_valid(panel_state.buf_id) then
-    panel_state.buf_id = vim.api.nvim_create_buf(false, true)
-    M.setup_buffer()
-  end
+  -- Store previous window for navigation
+  panel_state.previous_win = vim.api.nvim_get_current_win()
   
-  -- Calculate window dimensions
+  -- Calculate dimensions
   local width = M.config.width
-  local height = vim.o.lines - vim.o.cmdheight - 1
-  
-  -- Determine position
+  local total_height = vim.o.lines - vim.o.cmdheight - 2
+  local input_height = M.config.input_height
+  local main_height = total_height - input_height - 1
   local col = M.config.position == "right" and (vim.o.columns - width) or 0
   
-  -- Create window
-  panel_state.win_id = vim.api.nvim_open_win(panel_state.buf_id, false, {
+  -- Create main chat buffer and window
+  panel_state.main_buf = vim.api.nvim_create_buf(false, true)
+  M.setup_main_buffer()
+  
+  panel_state.main_win = vim.api.nvim_open_win(panel_state.main_buf, false, {
     relative = "editor",
     width = width,
-    height = height,
+    height = main_height,
     row = 0,
     col = col,
     style = "minimal",
-    border = "single",
-    title = " Claude Chat ",
+    border = M.config.modern_ui.enabled and "rounded" or "single",
+    title = M.get_panel_title(),
     title_pos = "center",
   })
   
-  -- Set window options
-  vim.api.nvim_win_set_option(panel_state.win_id, "wrap", true)
-  vim.api.nvim_win_set_option(panel_state.win_id, "linebreak", true)
-  vim.api.nvim_win_set_option(panel_state.win_id, "cursorline", true)
+  -- Create persistent input buffer and window
+  panel_state.input_buf = vim.api.nvim_create_buf(false, true)
+  M.setup_input_buffer()
+  
+  panel_state.input_win = vim.api.nvim_open_win(panel_state.input_buf, M.config.auto_input, {
+    relative = "editor",
+    width = width,
+    height = input_height,
+    row = main_height + 1,
+    col = col,
+    style = "minimal",
+    border = M.config.modern_ui.enabled and "rounded" or "single",
+    title = M.config.modern_ui.icons.input .. " Message",
+    title_pos = "left",
+  })
+  
+  -- Setup window options
+  M.setup_window_options()
   
   panel_state.is_open = true
   
-  -- Update context and refresh display
+  -- Update context and refresh
   M.update_context()
   M.refresh_display()
   
-  -- Adjust main window if needed
-  if M.config.position == "right" then
-    vim.cmd("vertical resize " .. (vim.o.columns - width - 1))
-  else
-    vim.cmd("wincmd l | vertical resize " .. (vim.o.columns - width - 1))
+  -- Setup navigation keymaps
+  if M.config.navigation.enable_window_nav then
+    M.setup_navigation_keymaps()
+  end
+  
+  -- Setup additional keymaps
+  M.setup_after_open()
+  
+  -- Adjust main window layout
+  M.adjust_main_layout()
+  
+  -- Auto-focus based on config
+  M.handle_auto_focus()
+  
+  -- Start animations if enabled
+  if M.config.modern_ui.animations then
+    M.start_opening_animation()
   end
 end
 
--- Close the chat panel
+-- Helper functions for modern UI
+
+-- Get dynamic panel title with status
+function M.get_panel_title()
+  local base_title = " Claude Chat "
+  if panel_state.loading then
+    return M.config.modern_ui.icons.loading .. base_title
+  elseif #panel_state.chat_history > 0 then
+    return M.config.modern_ui.icons.claude .. base_title .. "(" .. #panel_state.chat_history .. ")"
+  else
+    return M.config.modern_ui.icons.claude .. base_title
+  end
+end
+
+-- Setup main chat buffer
+function M.setup_main_buffer()
+  local buf = panel_state.main_buf
+  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(buf, "swapfile", false)
+  vim.api.nvim_buf_set_option(buf, "filetype", "claude-chat")
+  vim.api.nvim_buf_set_option(buf, "modifiable", false)
+  vim.api.nvim_buf_set_name(buf, "Claude Chat")
+end
+
+-- Setup input buffer with prompt
+function M.setup_input_buffer()
+  local buf = panel_state.input_buf
+  vim.api.nvim_buf_set_option(buf, "buftype", "prompt")
+  vim.api.nvim_buf_set_option(buf, "filetype", "claude-input")
+  vim.api.nvim_buf_set_option(buf, "swapfile", false)
+  vim.api.nvim_buf_set_name(buf, "Claude Input")
+  
+  -- Setup prompt with modern icon
+  vim.fn.prompt_setprompt(buf, M.config.modern_ui.icons.input .. " ")
+  
+  -- Setup input keymaps
+  M.setup_input_keymaps(buf)
+end
+
+-- Setup window display options
+function M.setup_window_options()
+  -- Main window options
+  if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+    vim.api.nvim_win_set_option(panel_state.main_win, "wrap", true)
+    vim.api.nvim_win_set_option(panel_state.main_win, "linebreak", true)
+    vim.api.nvim_win_set_option(panel_state.main_win, "cursorline", false)
+    vim.api.nvim_win_set_option(panel_state.main_win, "number", false)
+    vim.api.nvim_win_set_option(panel_state.main_win, "relativenumber", false)
+  end
+  
+  -- Input window options
+  if panel_state.input_win and vim.api.nvim_win_is_valid(panel_state.input_win) then
+    vim.api.nvim_win_set_option(panel_state.input_win, "wrap", true)
+    vim.api.nvim_win_set_option(panel_state.input_win, "cursorline", true)
+    vim.api.nvim_win_set_option(panel_state.input_win, "number", false)
+    vim.api.nvim_win_set_option(panel_state.input_win, "relativenumber", false)
+  end
+end
+
+-- Setup navigation keymaps for seamless window switching
+function M.setup_navigation_keymaps()
+  local function setup_nav_for_buffer(buf, win_type)
+    local opts = { buffer = buf, silent = true, noremap = true }
+    
+    -- Smart window navigation
+    vim.keymap.set({"n", "i"}, M.config.keymaps.nav_left, function()
+      M.smart_navigate("left")
+    end, opts)
+    
+    vim.keymap.set({"n", "i"}, M.config.keymaps.nav_right, function()
+      M.smart_navigate("right")
+    end, opts)
+    
+    vim.keymap.set({"n", "i"}, M.config.keymaps.nav_up, function()
+      M.smart_navigate("up")
+    end, opts)
+    
+    vim.keymap.set({"n", "i"}, M.config.keymaps.nav_down, function()
+      M.smart_navigate("down")
+    end, opts)
+    
+    -- Focus switching
+    vim.keymap.set({"n", "i"}, M.config.keymaps.focus_input, function()
+      M.focus_input()
+    end, opts)
+    
+    vim.keymap.set({"n", "i"}, M.config.keymaps.focus_panel, function()
+      M.focus_panel()
+    end, opts)
+  end
+  
+  -- Setup for both buffers
+  if panel_state.main_buf then
+    setup_nav_for_buffer(panel_state.main_buf, "main")
+  end
+  if panel_state.input_buf then
+    setup_nav_for_buffer(panel_state.input_buf, "input")
+  end
+end
+
+-- Smart navigation between windows
+function M.smart_navigate(direction)
+  local current_win = vim.api.nvim_get_current_win()
+  
+  -- If we're in the chat panel and trying to go left/right, navigate to editor
+  if (current_win == panel_state.main_win or current_win == panel_state.input_win) then
+    if direction == "left" and M.config.position == "right" then
+      -- Go to previous window (editor)
+      if panel_state.previous_win and vim.api.nvim_win_is_valid(panel_state.previous_win) then
+        vim.api.nvim_set_current_win(panel_state.previous_win)
+      else
+        vim.cmd("wincmd h")
+      end
+      return
+    elseif direction == "right" and M.config.position == "left" then
+      -- Go to next window (editor)
+      vim.cmd("wincmd l")
+      return
+    elseif direction == "up" and current_win == panel_state.input_win then
+      -- Go from input to main panel
+      vim.api.nvim_set_current_win(panel_state.main_win)
+      return
+    elseif direction == "down" and current_win == panel_state.main_win then
+      -- Go from main panel to input
+      vim.api.nvim_set_current_win(panel_state.input_win)
+      if M.config.auto_input then
+        vim.cmd("startinsert!")
+      end
+      return
+    end
+  end
+  
+  -- Check if we're in editor and trying to navigate to panel
+  if direction == "right" and M.config.position == "right" and panel_state.is_open then
+    M.focus_input()
+    return
+  elseif direction == "left" and M.config.position == "left" and panel_state.is_open then
+    M.focus_input()
+    return
+  end
+  
+  -- Default window navigation
+  vim.cmd("wincmd " .. direction:sub(1,1))
+end
+
+-- Focus management functions
+function M.focus_input()
+  if panel_state.input_win and vim.api.nvim_win_is_valid(panel_state.input_win) then
+    vim.api.nvim_set_current_win(panel_state.input_win)
+    panel_state.focus_mode = "input"
+    if M.config.auto_input then
+      vim.cmd("startinsert!")
+    end
+  end
+end
+
+function M.focus_panel()
+  if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+    vim.api.nvim_set_current_win(panel_state.main_win)
+    panel_state.focus_mode = "panel"
+  end
+end
+
+-- Handle auto-focus on panel open
+function M.handle_auto_focus()
+  vim.schedule(function()
+    if M.config.navigation.focus_on_open == "input" then
+      M.focus_input()
+    elseif M.config.navigation.focus_on_open == "panel" then
+      M.focus_panel()
+    elseif M.config.navigation.focus_on_open == "previous" then
+      -- Stay in previous window
+      if panel_state.previous_win and vim.api.nvim_win_is_valid(panel_state.previous_win) then
+        vim.api.nvim_set_current_win(panel_state.previous_win)
+      end
+    end
+  end)
+end
+
+-- Adjust main editor layout
+function M.adjust_main_layout()
+  if M.config.smart_resize then
+    local available_width = vim.o.columns - M.config.width - 2
+    if M.config.position == "right" then
+      vim.cmd("vertical resize " .. available_width)
+    else
+      vim.cmd("wincmd l | vertical resize " .. available_width)
+    end
+  end
+end
+
+-- Opening animation
+function M.start_opening_animation()
+  if not M.config.modern_ui.animations then
+    return
+  end
+  
+  -- Simple fade-in effect by updating title
+  local frames = {"▱", "▲", "▰", "▲"}
+  local frame = 1
+  
+  panel_state.animation_timer = vim.loop.new_timer()
+  panel_state.animation_timer:start(0, 150, vim.schedule_wrap(function()
+    if not panel_state.is_open then
+      if panel_state.animation_timer then
+        panel_state.animation_timer:stop()
+        panel_state.animation_timer:close()
+        panel_state.animation_timer = nil
+      end
+      return
+    end
+    
+    frame = frame % #frames + 1
+    
+    -- Update title with animation
+    if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+      local title = frames[frame] .. " Claude Chat "
+      vim.api.nvim_win_set_config(panel_state.main_win, {
+        title = title,
+      })
+    end
+    
+    -- Stop animation after a few cycles
+    if frame > 12 then
+      if panel_state.animation_timer then
+        panel_state.animation_timer:stop()
+        panel_state.animation_timer:close()
+        panel_state.animation_timer = nil
+      end
+      -- Reset to normal title
+      if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+        vim.api.nvim_win_set_config(panel_state.main_win, {
+          title = M.get_panel_title(),
+        })
+      end
+    end
+  end))
+end
+
+-- Close the modern chat panel
 function M.close()
   if not panel_state.is_open then
     return
   end
   
-  -- Close input window if open
-  M.close_input()
-  
-  -- Close main panel window
-  if panel_state.win_id and vim.api.nvim_win_is_valid(panel_state.win_id) then
-    vim.api.nvim_win_close(panel_state.win_id, true)
+  -- Stop animations
+  if panel_state.animation_timer then
+    panel_state.animation_timer:stop()
+    panel_state.animation_timer:close()
+    panel_state.animation_timer = nil
   end
   
-  panel_state.is_open = false
-  panel_state.win_id = nil
+  -- Close windows
+  if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+    vim.api.nvim_win_close(panel_state.main_win, true)
+  end
   
-  -- Restore main window size
+  if panel_state.input_win and vim.api.nvim_win_is_valid(panel_state.input_win) then
+    vim.api.nvim_win_close(panel_state.input_win, true)
+  end
+  
+  -- Clean up buffers (keep for session continuity)
+  panel_state.is_open = false
+  panel_state.main_win = nil
+  panel_state.input_win = nil
+  
+  -- Restore main window layout
   vim.cmd("wincmd =")
+  
+  -- Return focus to previous window
+  if panel_state.previous_win and vim.api.nvim_win_is_valid(panel_state.previous_win) then
+    vim.api.nvim_set_current_win(panel_state.previous_win)
+  end
 end
 
--- Setup buffer with keymaps and options
-function M.setup_buffer()
-  local buf = panel_state.buf_id
-  
-  -- Buffer options
-  vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(buf, "swapfile", false)
-  vim.api.nvim_buf_set_option(buf, "filetype", "claude-chat")
-  vim.api.nvim_buf_set_name(buf, "Claude Chat Panel")
-  
-  -- Buffer keymaps
+-- Setup input keymaps for the persistent input buffer
+function M.setup_input_keymaps(buf)
   local opts = { buffer = buf, silent = true, noremap = true }
+  
+  -- Send message on Enter (both normal and insert mode)
+  vim.keymap.set("i", "<CR>", function()
+    M.send_message()
+  end, opts)
+  
+  vim.keymap.set("n", "<CR>", function()
+    M.send_message()
+  end, opts)
+  
+  -- Close panel on Escape
+  vim.keymap.set({"i", "n"}, "<Esc>", function()
+    M.close()
+  end, opts)
+  
+  -- Input history navigation
+  vim.keymap.set("i", "<Up>", function()
+    M.navigate_input_history(-1)
+  end, opts)
+  
+  vim.keymap.set("i", "<Down>", function()
+    M.navigate_input_history(1)
+  end, opts)
+  
+  -- Clear current input
+  vim.keymap.set("i", "<C-u>", function()
+    M.clear_input()
+  end, opts)
+  
+  -- Tab completion (future enhancement)
+  vim.keymap.set("i", "<Tab>", function()
+    -- Could add command completion here
+    return "<Tab>"
+  end, { buffer = buf, expr = true })
+end
+
+-- Setup main panel keymaps  
+function M.setup_main_panel_keymaps()
+  if not panel_state.main_buf then return end
+  
+  local opts = { buffer = panel_state.main_buf, silent = true, noremap = true }
   
   -- Toggle panel
   vim.keymap.set("n", M.config.keymaps.toggle, M.toggle, opts)
   vim.keymap.set("n", "q", M.close, opts)
-  
-  -- Start new message
-  vim.keymap.set("n", "i", M.start_input, opts)
-  vim.keymap.set("n", "a", M.start_input, opts)
-  vim.keymap.set("n", "o", M.start_input, opts)
   
   -- Clear history
   vim.keymap.set("n", M.config.keymaps.clear_history, M.clear_history, opts)
@@ -195,6 +588,11 @@ function M.setup_buffer()
   
   -- Context actions
   vim.keymap.set("n", "c", M.update_context, opts)
+  
+  -- Scroll to bottom
+  vim.keymap.set("n", "G", function()
+    M.scroll_to_bottom()
+  end, opts)
 end
 
 -- Update current file context
@@ -236,163 +634,326 @@ function M.update_context()
   end
 end
 
--- Refresh the chat display
+-- Modern chat display with enhanced UI
 function M.refresh_display()
-  if not panel_state.is_open or not panel_state.buf_id or not vim.api.nvim_buf_is_valid(panel_state.buf_id) then
+  if not panel_state.is_open or not panel_state.main_buf or not vim.api.nvim_buf_is_valid(panel_state.main_buf) then
     return
   end
   
   local lines = {}
+  local icons = M.config.modern_ui.icons
   
-  -- Header
-  table.insert(lines, "╭─ Claude Code Chat ─╮")
-  table.insert(lines, "│                    │")
+  -- Modern header with status
+  table.insert(lines, "╭─── " .. icons.claude .. " Claude Chat ─────────────╮")
   
-  -- Context info
+  -- Status line
+  local status = panel_state.loading and "Processing..." or "Ready"
+  local history_count = #panel_state.chat_history
+  table.insert(lines, "│ Status: " .. status .. string.rep(" ", 20 - #status) .. "│")
+  table.insert(lines, "│ Messages: " .. history_count .. string.rep(" ", 18 - #tostring(history_count)) .. "│")
+  
+  -- Context info with modern styling
   if M.config.show_context_info and panel_state.current_context then
     local ctx = panel_state.current_context
     local filename = ctx.filename and vim.fn.fnamemodify(ctx.filename, ":t") or "No file"
     local filetype = ctx.filetype or "unknown"
     
-    table.insert(lines, "├─ Context ─────────┤")
-    table.insert(lines, "│ File: " .. filename)
-    table.insert(lines, "│ Type: " .. filetype)
-    if ctx.selection then
-      table.insert(lines, "│ Selection: Yes")
-    end
-    table.insert(lines, "│                    │")
+    table.insert(lines, "├─── 📄 Context ──────────────────┤")
+    table.insert(lines, "│ " .. filename .. string.rep(" ", 28 - #filename) .. "│")
+    table.insert(lines, "│ " .. filetype .. (ctx.selection and " (selected)" or "") .. string.rep(" ", 28 - #filetype - (ctx.selection and 11 or 0)) .. "│")
   end
   
-  -- Instructions
-  table.insert(lines, "├─ Controls ────────┤")
-  table.insert(lines, "│ i/a/o - Send msg   │")
-  table.insert(lines, "│ r - Refresh        │")
-  table.insert(lines, "│ c - Update context │")
-  table.insert(lines, "│ " .. M.config.keymaps.clear_history .. " - Clear history │")
-  table.insert(lines, "│ q - Close panel    │")
-  table.insert(lines, "├─ Commands ────────┤")
-  table.insert(lines, "│ :ClaudeChatStatus  │")
-  table.insert(lines, "╰────────────────────╯")
+  -- Modern controls
+  table.insert(lines, "├─── ⚡ Controls ──────────────────┤")
+  table.insert(lines, "│ Enter - Send • Esc - Close      │")
+  table.insert(lines, "│ ↑/↓ - History • Ctrl+U - Clear  │")
+  table.insert(lines, "│ " .. M.config.keymaps.clear_history .. " - Clear all • r - Refresh │")
+  table.insert(lines, "╰─────────────────────────────────╯")
   table.insert(lines, "")
   
-  -- Chat history
+  -- Chat history with modern formatting
   if #panel_state.chat_history > 0 then
-    table.insert(lines, "── Chat History ──")
-    table.insert(lines, "")
-    
     for i, entry in ipairs(panel_state.chat_history) do
-      -- User message
-      table.insert(lines, "👤 You:")
+      -- Timestamp
+      local timestamp = os.date("%H:%M", entry.timestamp or os.time())
+      
+      -- User message with modern styling
+      table.insert(lines, "┌─ " .. icons.user .. " You (" .. timestamp .. ") " .. string.rep("─", 15))
       local user_lines = vim.split(entry.user_message, "\n", { plain = true })
       for _, line in ipairs(user_lines) do
-        table.insert(lines, "   " .. line)
+        table.insert(lines, "│ " .. line)
       end
+      table.insert(lines, "└" .. string.rep("─", 35))
       table.insert(lines, "")
       
-      -- Claude response
-      table.insert(lines, "🤖 Claude:")
-      if entry.response then
-        local response_lines = vim.split(entry.response, "\n", { plain = true })
-        for _, line in ipairs(response_lines) do
-          table.insert(lines, "   " .. line)
-        end
-      elseif entry.loading then
-        table.insert(lines, "   ⏳ Thinking...")
+      -- Claude response with status indicators
+      if entry.loading then
+        table.insert(lines, "┌─ " .. icons.loading .. " Claude (thinking...) " .. string.rep("─", 8))
+        table.insert(lines, "│ " .. M.get_loading_animation())
       elseif entry.error then
-        table.insert(lines, "   ❌ Error: " .. entry.error)
+        table.insert(lines, "┌─ " .. icons.error .. " Claude (error) " .. string.rep("─", 13))
+        table.insert(lines, "│ " .. entry.error)
+      else
+        table.insert(lines, "┌─ " .. icons.claude .. " Claude (" .. timestamp .. ") " .. string.rep("─", 12))
+        if entry.response then
+          local response_lines = vim.split(entry.response, "\n", { plain = true })
+          for _, line in ipairs(response_lines) do
+            table.insert(lines, "│ " .. line)
+          end
+        end
       end
-      
-      table.insert(lines, "")
-      table.insert(lines, string.rep("─", 20))
+      table.insert(lines, "└" .. string.rep("─", 35))
       table.insert(lines, "")
     end
   else
-    table.insert(lines, "No chat history yet.")
-    table.insert(lines, "Press 'i' to start a conversation!")
+    -- Welcome message
+    table.insert(lines, "┌─ Welcome to Claude Chat! ───────┐")
+    table.insert(lines, "│                                 │")
+    table.insert(lines, "│  Start typing in the input      │")
+    table.insert(lines, "│  area below to chat with        │")
+    table.insert(lines, "│  Claude about your code!        │")
+    table.insert(lines, "│                                 │")
+    table.insert(lines, "└─────────────────────────────────┘")
     table.insert(lines, "")
   end
   
-  -- Update buffer
-  vim.api.nvim_buf_set_option(panel_state.buf_id, "modifiable", true)
-  vim.api.nvim_buf_set_lines(panel_state.buf_id, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(panel_state.buf_id, "modifiable", false)
+  -- Update buffer with syntax highlighting
+  vim.api.nvim_buf_set_option(panel_state.main_buf, "modifiable", true)
+  vim.api.nvim_buf_set_lines(panel_state.main_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(panel_state.main_buf, "modifiable", false)
   
-  -- Scroll to bottom
-  if panel_state.win_id and vim.api.nvim_win_is_valid(panel_state.win_id) then
-    vim.api.nvim_win_set_cursor(panel_state.win_id, {#lines, 0})
+  -- Apply syntax highlighting if enabled
+  if M.config.modern_ui.enabled then
+    M.apply_syntax_highlighting()
   end
+  
+  -- Auto-scroll to bottom
+  M.scroll_to_bottom()
 end
 
--- Start input mode for new message
-function M.start_input()
-  if panel_state.input_mode or not panel_state.is_open then
+-- Loading animation frames
+local loading_frames = {"●○○", "○●○", "○○●", "○●○"}
+local loading_frame_index = 1
+
+function M.get_loading_animation()
+  loading_frame_index = loading_frame_index % #loading_frames + 1
+  return loading_frames[loading_frame_index] .. " Processing your request..."
+end
+
+-- Apply modern syntax highlighting
+function M.apply_syntax_highlighting()
+  if not panel_state.main_buf or not vim.api.nvim_buf_is_valid(panel_state.main_buf) then
     return
   end
   
-  -- Create input buffer
-  panel_state.input_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_option(panel_state.input_buf, "buftype", "prompt")
-  vim.api.nvim_buf_set_option(panel_state.input_buf, "filetype", "claude-input")
+  local ns = vim.api.nvim_create_namespace("claude_chat_hl")
+  vim.api.nvim_buf_clear_namespace(panel_state.main_buf, ns, 0, -1)
   
-  -- Setup prompt
-  vim.fn.prompt_setprompt(panel_state.input_buf, "💬 Message: ")
+  local lines = vim.api.nvim_buf_get_lines(panel_state.main_buf, 0, -1, false)
   
-  -- Create input window at bottom of panel
-  local panel_width = M.config.width
-  local input_height = 3
-  local panel_col = M.config.position == "right" and (vim.o.columns - panel_width) or 0
-  local input_row = vim.o.lines - vim.o.cmdheight - input_height - 1
-  
-  panel_state.input_win = vim.api.nvim_open_win(panel_state.input_buf, true, {
-    relative = "editor",
-    width = panel_width,
-    height = input_height,
-    row = input_row,
-    col = panel_col,
-    style = "minimal",
-    border = "single",
-    title = " Send Message ",
-    title_pos = "center",
-  })
-  
-  panel_state.input_mode = true
-  
-  -- Input keymaps
-  local opts = { buffer = panel_state.input_buf, silent = true }
-  
-  vim.keymap.set("i", M.config.keymaps.send, function()
-    M.send_message()
-  end, opts)
-  
-  vim.keymap.set({"i", "n"}, M.config.keymaps.cancel, function()
-    M.close_input()
-  end, opts)
-  
-  -- Focus input and enter insert mode
-  vim.cmd("startinsert")
+  for i, line in ipairs(lines) do
+    local line_num = i - 1
+    
+    -- Highlight headers and borders
+    if line:match("^[╭├╰┌└].*[╮┤╯┐┘]$") then
+      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.border, line_num, 0, -1)
+    
+    -- Highlight user messages
+    elseif line:match("^│.*" .. M.config.modern_ui.icons.user) or line:match("^┌.*" .. M.config.modern_ui.icons.user) then
+      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.user_message, line_num, 0, -1)
+    
+    -- Highlight Claude messages
+    elseif line:match("^│.*" .. M.config.modern_ui.icons.claude) or line:match("^┌.*" .. M.config.modern_ui.icons.claude) then
+      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.claude_message, line_num, 0, -1)
+    
+    -- Highlight loading messages
+    elseif line:match(M.config.modern_ui.icons.loading) then
+      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.loading, line_num, 0, -1)
+    
+    -- Highlight error messages
+    elseif line:match(M.config.modern_ui.icons.error) then
+      vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.error, line_num, 0, -1)
+    end
+  end
 end
 
--- Close input window
-function M.close_input()
-  if not panel_state.input_mode then
+-- Utility function to scroll to bottom
+function M.scroll_to_bottom()
+  if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+    local line_count = vim.api.nvim_buf_line_count(panel_state.main_buf)
+    vim.api.nvim_win_set_cursor(panel_state.main_win, {line_count, 0})
+  end
+end
+
+-- Input history navigation
+function M.navigate_input_history(direction)
+  if #panel_state.input_history == 0 then
     return
   end
   
-  if panel_state.input_win and vim.api.nvim_win_is_valid(panel_state.input_win) then
-    vim.api.nvim_win_close(panel_state.input_win, true)
+  if direction < 0 then -- Up arrow - go back in history
+    panel_state.input_history_pos = math.max(1, panel_state.input_history_pos - 1)
+  else -- Down arrow - go forward in history
+    panel_state.input_history_pos = math.min(#panel_state.input_history + 1, panel_state.input_history_pos + 1)
   end
   
+  -- Set the input buffer content
   if panel_state.input_buf and vim.api.nvim_buf_is_valid(panel_state.input_buf) then
-    vim.api.nvim_buf_delete(panel_state.input_buf, { force = true })
+    local content = ""
+    if panel_state.input_history_pos <= #panel_state.input_history then
+      content = panel_state.input_history[panel_state.input_history_pos]
+    end
+    
+    vim.api.nvim_buf_set_lines(panel_state.input_buf, 0, -1, false, {content})
+    vim.cmd("startinsert!")
+  end
+end
+
+-- Clear current input
+function M.clear_input()
+  if panel_state.input_buf and vim.api.nvim_buf_is_valid(panel_state.input_buf) then
+    vim.api.nvim_buf_set_lines(panel_state.input_buf, 0, -1, false, {""})
+  end
+end
+
+-- Enhanced send message function
+function M.send_message()
+  if not panel_state.input_buf or not vim.api.nvim_buf_is_valid(panel_state.input_buf) then
+    return
   end
   
-  panel_state.input_mode = false
-  panel_state.input_win = nil
-  panel_state.input_buf = nil
+  -- Get message from input buffer
+  local lines = vim.api.nvim_buf_get_lines(panel_state.input_buf, 0, -1, false)
+  local message = utils.string.trim(table.concat(lines, "\n"))
   
-  -- Return focus to panel
-  if panel_state.win_id and vim.api.nvim_win_is_valid(panel_state.win_id) then
-    vim.api.nvim_set_current_win(panel_state.win_id)
+  -- Remove the prompt prefix if it exists
+  local prompt_prefix = M.config.modern_ui.icons.input .. " "
+  if message:sub(1, #prompt_prefix) == prompt_prefix then
+    message = message:sub(#prompt_prefix + 1)
+  end
+  
+  if message == "" then
+    return
+  end
+  
+  -- Add to input history
+  table.insert(panel_state.input_history, message)
+  if #panel_state.input_history > 50 then -- Limit history size
+    table.remove(panel_state.input_history, 1)
+  end
+  panel_state.input_history_pos = #panel_state.input_history + 1
+  
+  -- Clear input
+  M.clear_input()
+  
+  -- Add to chat history
+  local entry = {
+    user_message = message,
+    loading = true,
+    timestamp = os.time(),
+  }
+  
+  table.insert(panel_state.chat_history, entry)
+  
+  -- Limit history size
+  if #panel_state.chat_history > M.config.max_history then
+    table.remove(panel_state.chat_history, 1)
+  end
+  
+  -- Update loading state
+  panel_state.loading = true
+  
+  -- Refresh display with loading indicator
+  M.refresh_display()
+  
+  -- Update window title to show loading
+  if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+    vim.api.nvim_win_set_config(panel_state.main_win, {
+      title = M.get_panel_title(),
+    })
+  end
+  
+  -- Update context before sending
+  M.update_context()
+  
+  -- Check API status
+  local api_status = M.check_api_status()
+  if not api_status.available then
+    local last_entry = panel_state.chat_history[#panel_state.chat_history]
+    if last_entry then
+      last_entry.loading = false
+      last_entry.error = "API not available: " .. api_status.status
+    end
+    panel_state.loading = false
+    M.refresh_display()
+    vim.notify("Claude Code Chat: " .. api_status.status, vim.log.levels.ERROR)
+    return
+  end
+  
+  -- Send to Claude API with enhanced callback
+  local success, result = pcall(function()
+    return api.request(message, panel_state.current_context, function(response, error)
+      panel_state.loading = false
+      
+      -- Update the last entry
+      local last_entry = panel_state.chat_history[#panel_state.chat_history]
+      if last_entry then
+        last_entry.loading = false
+        if error then
+          last_entry.error = tostring(error)
+          vim.notify("Claude Code Chat: " .. tostring(error), vim.log.levels.ERROR)
+        elseif response then
+          last_entry.response = tostring(response)
+          -- Show success notification for first message
+          if #panel_state.chat_history == 1 and M.config.modern_ui.enabled then
+            vim.notify(M.config.modern_ui.icons.success .. " Response received!", vim.log.levels.INFO)
+          end
+        else
+          last_entry.error = "Empty response from API"
+          vim.notify("Claude Code Chat: Received empty response", vim.log.levels.WARN)
+        end
+      end
+      
+      -- Update window title
+      if panel_state.main_win and vim.api.nvim_win_is_valid(panel_state.main_win) then
+        vim.api.nvim_win_set_config(panel_state.main_win, {
+          title = M.get_panel_title(),
+        })
+      end
+      
+      -- Refresh display
+      M.refresh_display()
+      
+      -- Auto-focus input for next message if enabled
+      if M.config.auto_input and M.config.navigation.focus_on_open == "input" then
+        vim.schedule(function()
+          M.focus_input()
+        end)
+      end
+    end)
+  end)
+  
+  if not success then
+    panel_state.loading = false
+    local last_entry = panel_state.chat_history[#panel_state.chat_history]
+    if last_entry then
+      last_entry.loading = false
+      last_entry.error = "API call failed: " .. tostring(result)
+    end
+    M.refresh_display()
+    vim.notify("Claude Code Chat: Failed to call API - " .. tostring(result), vim.log.levels.ERROR)
+    return
+  end
+  
+  if not result then
+    panel_state.loading = false
+    local last_entry = panel_state.chat_history[#panel_state.chat_history]
+    if last_entry then
+      last_entry.loading = false
+      last_entry.error = "Failed to start request"
+    end
+    M.refresh_display()
+    vim.notify("Claude Code Chat: Failed to initiate request", vim.log.levels.ERROR)
   end
 end
 
@@ -545,28 +1106,56 @@ function M.show_api_status()
   return status.available
 end
 
--- Cleanup function
+-- Enhanced cleanup function
 function M.cleanup()
+  -- Stop animations
+  if panel_state.animation_timer then
+    panel_state.animation_timer:stop()
+    panel_state.animation_timer:close()
+    panel_state.animation_timer = nil
+  end
+  
   if panel_state.is_open then
     M.close()
   end
   
-  if panel_state.buf_id and vim.api.nvim_buf_is_valid(panel_state.buf_id) then
-    vim.api.nvim_buf_delete(panel_state.buf_id, { force = true })
+  -- Clean up buffers
+  if panel_state.main_buf and vim.api.nvim_buf_is_valid(panel_state.main_buf) then
+    vim.api.nvim_buf_delete(panel_state.main_buf, { force = true })
   end
   
-  -- Reset state
+  if panel_state.input_buf and vim.api.nvim_buf_is_valid(panel_state.input_buf) then
+    vim.api.nvim_buf_delete(panel_state.input_buf, { force = true })
+  end
+  
+  -- Reset enhanced state
   panel_state = {
     is_open = false,
-    win_id = nil,
-    buf_id = nil,
+    main_win = nil,
+    main_buf = nil,
+    input_win = nil,
+    input_buf = nil,
     chat_history = {},
     current_context = nil,
-    input_mode = false,
-    input_buf = nil,
-    input_win = nil,
     loading = false,
+    previous_win = nil,
+    input_history = {},
+    input_history_pos = 0,
+    animation_timer = nil,
+    focus_mode = "input",
   }
+end
+
+-- Updated setup function call
+function M.setup_after_open()
+  -- Setup main panel keymaps
+  M.setup_main_panel_keymaps()
+  
+  -- Setup autocommands if not already done
+  if not M.autocommands_setup then
+    M.setup_autocommands()
+    M.autocommands_setup = true
+  end
 end
 
 return M
