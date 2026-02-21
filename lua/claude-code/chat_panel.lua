@@ -49,6 +49,10 @@ function M.setup(user_config)
     desc = "Clear Claude Code chat history",
   })
   
+  vim.api.nvim_create_user_command("ClaudeChatStatus", M.show_api_status, {
+    desc = "Check Claude Code API status",
+  })
+  
   -- Setup global keymap
   vim.keymap.set("n", M.config.keymaps.toggle, M.toggle, {
     desc = "Toggle Claude Code chat panel",
@@ -266,6 +270,8 @@ function M.refresh_display()
   table.insert(lines, "│ c - Update context │")
   table.insert(lines, "│ " .. M.config.keymaps.clear_history .. " - Clear history │")
   table.insert(lines, "│ q - Close panel    │")
+  table.insert(lines, "├─ Commands ────────┤")
+  table.insert(lines, "│ :ClaudeChatStatus  │")
   table.insert(lines, "╰────────────────────╯")
   table.insert(lines, "")
   
@@ -426,27 +432,67 @@ function M.send_message()
   -- Update context before sending
   M.update_context()
   
-  -- Send to Claude API
-  panel_state.loading = true
-  
-  local request_id = api.request(message, panel_state.current_context, function(response, error)
-    panel_state.loading = false
-    
-    -- Update the last entry
+  -- Check API status before sending
+  local api_status = M.check_api_status()
+  if not api_status.available then
     local last_entry = panel_state.chat_history[#panel_state.chat_history]
     if last_entry then
       last_entry.loading = false
-      if error then
-        last_entry.error = tostring(error)
-        vim.notify("Chat request failed: " .. tostring(error), vim.log.levels.ERROR)
-      else
-        last_entry.response = tostring(response or "")
-      end
+      last_entry.error = "API not available: " .. api_status.status
     end
-    
-    -- Refresh display
     M.refresh_display()
+    vim.notify("Claude Code Chat: " .. api_status.status, vim.log.levels.ERROR)
+    return
+  end
+  
+  -- Send to Claude API
+  panel_state.loading = true
+  
+  -- Add some debugging info
+  local debug_info = {
+    message = message,
+    context_file = panel_state.current_context and panel_state.current_context.filename or "none",
+    timestamp = os.time()
+  }
+  
+  local request_id
+  local success, result = pcall(function()
+    return api.request(message, panel_state.current_context, function(response, error)
+      panel_state.loading = false
+      
+      -- Update the last entry
+      local last_entry = panel_state.chat_history[#panel_state.chat_history]
+      if last_entry then
+        last_entry.loading = false
+        if error then
+          last_entry.error = tostring(error)
+          vim.notify("Claude Code Chat: " .. tostring(error), vim.log.levels.ERROR)
+        elseif response then
+          last_entry.response = tostring(response)
+        else
+          last_entry.error = "Empty response from API"
+          vim.notify("Claude Code Chat: Received empty response", vim.log.levels.WARN)
+        end
+      end
+      
+      -- Refresh display
+      M.refresh_display()
+    end)
   end)
+  
+  if success then
+    request_id = result
+  else
+    panel_state.loading = false
+    local last_entry = panel_state.chat_history[#panel_state.chat_history]
+    if last_entry then
+      last_entry.loading = false
+      last_entry.error = "API call failed: " .. tostring(result)
+    end
+    M.refresh_display()
+    vim.notify("Claude Code Chat: Failed to call API - " .. tostring(result), vim.log.levels.ERROR)
+    return
+  end
   
   -- Handle API request failure
   if not request_id then
@@ -457,7 +503,7 @@ function M.send_message()
       last_entry.error = "Failed to start request"
     end
     M.refresh_display()
-    vim.notify("Failed to send message to Claude", vim.log.levels.ERROR)
+    vim.notify("Claude Code Chat: Failed to initiate request", vim.log.levels.ERROR)
   end
 end
 
@@ -476,6 +522,27 @@ end
 -- Get chat history
 function M.get_history()
   return vim.deepcopy(panel_state.chat_history)
+end
+
+-- Check API configuration status
+function M.check_api_status()
+  local status = api.check_auth_status()
+  return status
+end
+
+-- Show API status in chat panel
+function M.show_api_status()
+  local status = M.check_api_status()
+  local message = "API Status: " .. status.status
+  
+  if status.method == "cli" then
+    message = message .. " (using Claude CLI)"
+  elseif status.method == "api" then
+    message = message .. " (using HTTP API)"
+  end
+  
+  vim.notify("Claude Code: " .. message, status.available and vim.log.levels.INFO or vim.log.levels.WARN)
+  return status.available
 end
 
 -- Cleanup function
