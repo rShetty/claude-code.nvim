@@ -39,7 +39,4 @@ function! ClaudeCodeHelp()
   lua require('claude-code').show_help()
 endfunction
 
-" Health check registration
-function! health#claude_code#check() abort
-  lua require('claude-code.health').check()
-endfunction
+" Health check - will be handled by the health.lua module
