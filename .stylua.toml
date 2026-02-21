@@ -1,0 +1,23 @@
+# StyLua configuration for Claude Code Neovim Plugin
+
+# Column width for formatting
+column_width = 100
+
+# Line endings
+line_endings = "Unix"
+
+# Indentation
+indent_type = "Spaces"
+indent_width = 2
+
+# Quote style
+quote_style = "AutoPreferDouble"
+
+# Function call style
+call_parentheses = "Always"
+
+# Table formatting
+collapse_simple_statement = "Always"
+
+# Comments
+format_code_in_doc_comments = true

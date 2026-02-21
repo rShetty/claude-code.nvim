@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        neovim_version: ['v0.8.0', 'v0.9.0', 'nightly']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Neovim
+      uses: rhymond/setup-neovim@v1
+      with:
+        neovim-version: ${{ matrix.neovim_version }}
+    
+    - name: Install Lua
+      uses: leafo/gh-actions-lua@v10
+      with:
+        luaVersion: "5.1"
+    
+    - name: Install LuaRocks  
+      uses: leafo/gh-actions-luarocks@v4
+    
+    - name: Install dependencies
+      run: |
+        luarocks install busted
+        luarocks install luacov
+        luarocks install luacheck
+    
+    - name: Run tests
+      run: busted --verbose --coverage --output=json > test-results.json
+    
+    - name: Generate coverage report
+      run: luacov
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./luacov.report.out
+        fail_ci_if_error: false
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Lua
+      uses: leafo/gh-actions-lua@v10
+      with:
+        luaVersion: "5.1"
+    
+    - name: Install LuaRocks
+      uses: leafo/gh-actions-luarocks@v4
+    
+    - name: Install linting tools
+      run: |
+        luarocks install luacheck
+        npm install -g @fsouza/prettierd
+    
+    - name: Run luacheck
+      run: luacheck lua/ --config .luacheckrc
+      
+    - name: Install StyLua
+      uses: JohnnyMorganz/stylua-action@v3
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        version: latest
+        args: --check lua/
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install ldoc
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lua5.1 luarocks
+        sudo luarocks install ldoc
+    
+    - name: Generate documentation
+      run: ldoc lua/
+      
+    - name: Check for broken links in README
+      uses: gaurav-nelson/github-action-markdown-link-check@v1
+      with:
+        use-quiet-mode: 'yes'
+        use-verbose-mode: 'yes'
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+    
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'

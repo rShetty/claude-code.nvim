@@ -1,0 +1,26 @@
+return {
+  default = {
+    verbose = true,
+    coverage = false,
+    lpath = 'lua/?.lua;lua/?/init.lua',
+    ROOT = {
+      'tests'
+    },
+    pattern = '_spec%.lua$',
+    exclude = {
+      'tests/fixtures',
+    }
+  },
+  coverage = {
+    verbose = true,
+    coverage = true,
+    lpath = 'lua/?.lua;lua/?/init.lua',
+    ROOT = {
+      'tests'
+    },
+    pattern = '_spec%.lua$',
+    exclude = {
+      'tests/fixtures',
+    }
+  }
+}

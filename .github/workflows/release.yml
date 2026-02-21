@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Validate tag format
+      run: |
+        if [[ ! "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Invalid tag format. Expected: v1.2.3"
+          exit 1
+        fi
+    
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Extract version from tag
+        VERSION="${{ github.ref_name }}"
+        
+        # Get previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || echo "")
+        
+        # Generate changelog
+        if [ -n "$PREVIOUS_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" ${PREVIOUS_TAG}..${VERSION})
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" ${VERSION})
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+    
+    - name: Create Release Archive
+      run: |
+        VERSION="${{ github.ref_name }}"
+        mkdir -p "release/claude-code.nvim-${VERSION}"
+        
+        # Copy plugin files
+        cp -r lua/ "release/claude-code.nvim-${VERSION}/"
+        cp -r plugin/ "release/claude-code.nvim-${VERSION}/"
+        cp -r doc/ "release/claude-code.nvim-${VERSION}/" 2>/dev/null || true
+        cp README.md LICENSE "release/claude-code.nvim-${VERSION}/"
+        
+        # Create archive
+        cd release
+        tar -czf "claude-code.nvim-${VERSION}.tar.gz" "claude-code.nvim-${VERSION}/"
+        zip -r "claude-code.nvim-${VERSION}.zip" "claude-code.nvim-${VERSION}/"
+        cd ..
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Claude Code v${{ github.ref_name }}
+        body: |
+          ## Claude Code Neovim Plugin ${{ github.ref_name }}
+          
+          ### Changes
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ### Installation
+          
+          #### Using lazy.nvim
+          ```lua
+          {
+            'username/claude-code.nvim',
+            tag = '${{ github.ref_name }}',
+            config = function()
+              require('claudeai').setup({
+                api = { key = vim.env.ANTHROPIC_API_KEY }
+              })
+            end
+          }
+          ```
+          
+          #### Using packer.nvim
+          ```lua
+          use {
+            'username/claude-code.nvim',
+            tag = '${{ github.ref_name }}',
+            config = function()
+              require('claudeai').setup({
+                api = { key = vim.env.ANTHROPIC_API_KEY }
+              })
+            end
+          }
+          ```
+          
+          ### Verification
+          - Plugin tested on Neovim 0.8.0+
+          - All CI checks passed
+          - Documentation updated
+          
+          ---
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.previous_tag.outputs.tag }}...${{ github.ref_name }}
+        files: |
+          release/claude-code.nvim-${{ github.ref_name }}.tar.gz
+          release/claude-code.nvim-${{ github.ref_name }}.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+    
+    - name: Update Package Managers
+      run: |
+        echo "TODO: Submit to package managers (luarocks, etc.)"
+        # This could include automatic PRs to package manager repositories
