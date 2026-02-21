@@ -72,6 +72,20 @@ local validation_schemas = {
     layout = { type = "table", optional = true },
     terminal_prefix = { type = "string", optional = true },
   },
+  chat_panel = {
+    enabled = { type = "boolean" },
+    width = { type = "number", min = 30, max = 150 },
+    position = { type = "string", enum = { "left", "right" } },
+    auto_close = { type = "boolean" },
+    show_context_info = { type = "boolean" },
+    max_history = { type = "number", min = 1, max = 200 },
+    keymaps = {
+      toggle = { type = "string" },
+      send = { type = "string" },
+      cancel = { type = "string" },
+      clear_history = { type = "string" },
+    },
+  },
 }
 
 -- Default configuration for Claude Code
@@ -148,6 +162,22 @@ M.defaults = {
     progress_indicator = true, -- Show progress indicators
     syntax_highlighting = true, -- Enable syntax highlighting in responses
     auto_close_delay = 5000, -- Auto-close success messages after 5 seconds
+  },
+
+  -- Chat panel configuration
+  chat_panel = {
+    enabled = true,
+    width = 50, -- Panel width in columns
+    position = "right", -- "left" or "right"
+    auto_close = false, -- Auto-close panel after sending message
+    show_context_info = true, -- Show file context information
+    max_history = 50, -- Maximum number of chat entries to keep
+    keymaps = {
+      toggle = "<leader>cp", -- Toggle chat panel
+      send = "<CR>", -- Send message in input mode
+      cancel = "<Esc>", -- Cancel input
+      clear_history = "<leader>cc", -- Clear chat history
+    },
   },
 
   -- Keybindings configuration

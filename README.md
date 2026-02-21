@@ -55,6 +55,13 @@ A **comprehensive Neovim plugin** that transforms your coding experience with Cl
 - **🔄 Task Queue Management** - Prioritize and manage AI operations
 - **🧠 Agent Communication** - Context sharing between different AI agents
 
+### 💬 **Interactive Chat Panel**
+- **🎯 Persistent Sidebar** - Cursor-style chat panel that stays open
+- **📁 File Context Awareness** - Automatically includes current file context
+- **💾 Chat History** - Persistent conversation history with threading
+- **⌨️ Quick Toggle** - Simple keymap to show/hide panel
+- **🔄 Live Context Updates** - Context updates automatically when switching files
+
 ---
 
 ## 🚀 Quick Start
@@ -222,6 +229,22 @@ require('claude-code').setup({
       optimize_algorithms = true,
       improve_naming = true,
     },
+  },
+  
+  -- Chat panel configuration
+  chat_panel = {
+    enabled = true,
+    width = 50,              -- Panel width in columns
+    position = "right",      -- "left" or "right"
+    auto_close = false,      -- Auto-close after sending
+    show_context_info = true, -- Show file context
+    max_history = 50,        -- Max chat history entries
+    keymaps = {
+      toggle = "<leader>cp",        -- Toggle panel
+      send = "<CR>",              -- Send message
+      cancel = "<Esc>",           -- Cancel input
+      clear_history = "<leader>cc", -- Clear history
+    },
   }
 })
 ```
@@ -319,6 +342,13 @@ require('claude-code').setup({
 | `:ClaudeRefactorOptimize` | Optimize code | `<leader>ro` |
 | `:ClaudeRefactorRename` | Intelligent rename suggestions | `<leader>rn` |
 
+### Chat Panel Commands
+
+| Command | Description | Keybinding |
+|---------|-------------|------------|
+| `:ClaudeChatPanel` | Toggle persistent chat panel | `<leader>cp` |
+| `:ClaudeClearHistory` | Clear chat panel history | - |
+
 ### General Commands
 
 | Command | Description | Keybinding |
@@ -362,6 +392,15 @@ require('claude-code').setup({
 1. Select a function or method
 2. Use `:ClaudeGenerateTests` or `<leader>ct`
 3. Get comprehensive tests including edge cases
+
+### Use Chat Panel (Cursor-style)
+
+1. Press `<leader>cp` to toggle the chat panel
+2. Press `i`, `a`, or `o` in the panel to start typing a message
+3. Press `<CR>` to send your message to Claude
+4. Chat history persists across sessions
+5. File context is automatically included with each message
+6. Press `q` to close the panel
 
 ## 🎨 UI Features
 

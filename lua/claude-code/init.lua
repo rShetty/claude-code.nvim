@@ -9,6 +9,7 @@ local terminal = require("claude-code.terminal")
 local file_watcher = require("claude-code.file_watcher")
 local git = require("claude-code.git")
 local which_key = require("claude-code.which_key")
+local chat_panel = require("claude-code.chat_panel")
 
 local M = {}
 
@@ -24,6 +25,7 @@ local MODULE_LOAD_ORDER = {
   "git", 
   "file_watcher",
   "terminal",
+  "chat_panel",
   "which_key",
   "api",
   "ui"
@@ -94,6 +96,12 @@ function M.init_modules(user_config)
   if cfg.terminal and cfg.terminal.enabled then
     terminal.setup(user_config.terminal)
     M.modules_loaded.terminal = true
+  end
+  
+  -- Initialize chat panel
+  if cfg.chat_panel and cfg.chat_panel.enabled then
+    chat_panel.setup(user_config.chat_panel)
+    M.modules_loaded.chat_panel = true
   end
   
   -- Initialize which-key integration (after terminal for key bindings)
@@ -268,6 +276,10 @@ function M.cleanup_all_modules()
   -- Cleanup modules in reverse order
   if M.modules_loaded.which_key then
     which_key.cleanup()
+  end
+  
+  if M.modules_loaded.chat_panel then
+    chat_panel.cleanup()
   end
   
   if M.modules_loaded.terminal then
@@ -595,6 +607,7 @@ function M.show_status()
   table.insert(status_info, "")
   table.insert(status_info, "Enhanced Features:")
   table.insert(status_info, "- Terminal Integration: " .. (M.modules_loaded.terminal and "✅ Active" or "❌ Inactive"))
+  table.insert(status_info, "- Chat Panel: " .. (M.modules_loaded.chat_panel and "✅ Active" or "❌ Inactive"))
   table.insert(status_info, "- File Watching: " .. (M.modules_loaded.file_watcher and "✅ Active" or "❌ Inactive"))
   table.insert(status_info, "- Git Integration: " .. (M.modules_loaded.git and "✅ Active" or "❌ Inactive"))
   table.insert(status_info, "- Which-key Integration: " .. (M.modules_loaded.which_key and "✅ Active" or "❌ Inactive"))
@@ -606,6 +619,12 @@ function M.show_status()
   -- Add module-specific information
   if M.modules_loaded.terminal and terminal.is_active() then
     table.insert(status_info, "- Terminal: Active")
+  end
+  
+  if M.modules_loaded.chat_panel then
+    local panel_open = chat_panel.is_open() and "Open" or "Closed"
+    local history_count = #chat_panel.get_history()
+    table.insert(status_info, "- Chat Panel: " .. panel_open .. " (" .. history_count .. " messages)")
   end
   
   if M.modules_loaded.file_watcher then
