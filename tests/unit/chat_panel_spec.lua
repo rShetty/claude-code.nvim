@@ -44,6 +44,7 @@ describe("chat_panel module", function()
       fn = {
         fnamemodify = function(path, mod) return "test.lua" end,
         prompt_setprompt = function() end,
+        strdisplaywidth = function(str) return #str end,
       },
       cmd = function() end,
       split = function(str, sep) return {str} end,

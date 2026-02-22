@@ -32,7 +32,7 @@ local default_config = {
   auto_input = true, -- Auto-enter input mode
   show_context_info = true,
   max_history = 50,
-  input_height = 1, -- Single-line input
+  input_height = 3, -- Multi-line input area
   smart_resize = true,
   modern_ui = {
     enabled = true,
@@ -322,11 +322,12 @@ function M.setup_window_options()
   -- Input window options
   if panel_state.input_win and vim.api.nvim_win_is_valid(panel_state.input_win) then
     vim.api.nvim_win_set_option(panel_state.input_win, "wrap", true)
-    vim.api.nvim_win_set_option(panel_state.input_win, "cursorline", true)
+    vim.api.nvim_win_set_option(panel_state.input_win, "cursorline", false)
     vim.api.nvim_win_set_option(panel_state.input_win, "number", false)
     vim.api.nvim_win_set_option(panel_state.input_win, "relativenumber", false)
     vim.api.nvim_win_set_option(panel_state.input_win, "signcolumn", "no")
     vim.api.nvim_win_set_option(panel_state.input_win, "foldcolumn", "0")
+    vim.api.nvim_win_set_option(panel_state.input_win, "winhighlight", "Normal:Normal,FloatBorder:FloatBorder")
   end
 end
 
@@ -655,67 +656,115 @@ function M.update_context()
   end
 end
 
+-- Helper: pad or truncate text to fit within a box row
+-- content_w is the window's content width (M.config.width)
+-- Row format: "│ <text> │" where the whole line is content_w display columns
+local function box_row(text, content_w)
+  -- "│ " = 2 display cols, " │" = 2 display cols => 4 cols of chrome
+  local available = content_w - 4
+  local display_len = vim.fn.strdisplaywidth(text)
+  if display_len > available then
+    -- Truncate to fit (byte-level trim, then add ellipsis)
+    while vim.fn.strdisplaywidth(text) > available - 1 and #text > 0 do
+      text = text:sub(1, #text - 1)
+    end
+    text = text .. "…"
+    display_len = vim.fn.strdisplaywidth(text)
+  end
+  local pad = math.max(0, available - display_len)
+  return "│ " .. text .. string.rep(" ", pad) .. " │"
+end
+
+-- Helper: create a horizontal rule like "╭── Title ──╮"
+-- Total display width = content_w
+local function box_rule(left, right, content_w, title)
+  -- left + right corners = 2 display cols, fill the rest with "─"
+  local fill_w = content_w - 2
+  if title then
+    local title_w = vim.fn.strdisplaywidth(title)
+    local left_fill = 2
+    -- " title " adds title_w + 2 display cols (spaces around title)
+    local right_fill = math.max(0, fill_w - left_fill - title_w - 2)
+    return left .. string.rep("─", left_fill) .. " " .. title .. " " .. string.rep("─", right_fill) .. right
+  end
+  return left .. string.rep("─", fill_w) .. right
+end
+
+-- Helper: create a message divider "┌─ label ────…"
+-- Total display width = content_w
+local function msg_header(label, content_w)
+  local prefix = "┌─ " .. label .. " "
+  local prefix_w = vim.fn.strdisplaywidth(prefix)
+  local remaining = math.max(0, content_w - prefix_w)
+  return prefix .. string.rep("─", remaining)
+end
+
+local function msg_footer(content_w)
+  return "└" .. string.rep("─", content_w - 1)
+end
+
 -- Modern chat display with enhanced UI
 function M.refresh_display()
   if not panel_state.is_open or not panel_state.main_buf or not vim.api.nvim_buf_is_valid(panel_state.main_buf) then
     return
   end
-  
+
+  -- Use the actual panel content width for all box-drawing
+  local inner_w = M.config.width
   local lines = {}
   local icons = M.config.modern_ui.icons
-  
-  -- Modern header with status
-  table.insert(lines, "╭─── " .. icons.claude .. " Claude Chat ─────────────╮")
-  
+
+  -- Header
+  table.insert(lines, box_rule("╭", "╮", inner_w, icons.claude .. " Claude Chat"))
+
   -- Status line
   local status = panel_state.loading and "Processing..." or "Ready"
   local history_count = #panel_state.chat_history
-  table.insert(lines, "│ Status: " .. status .. string.rep(" ", 20 - #status) .. "│")
-  table.insert(lines, "│ Messages: " .. history_count .. string.rep(" ", 18 - #tostring(history_count)) .. "│")
-  
-  -- Context info with modern styling
+  table.insert(lines, box_row("Status: " .. status, inner_w))
+  table.insert(lines, box_row("Messages: " .. tostring(history_count), inner_w))
+
+  -- Context info
   if M.config.show_context_info and panel_state.current_context then
     local ctx = panel_state.current_context
     local filename = ctx.filename and vim.fn.fnamemodify(ctx.filename, ":t") or "No file"
     local filetype = ctx.filetype or "unknown"
-    
-    table.insert(lines, "├─── 📄 Context ──────────────────┤")
-    table.insert(lines, "│ " .. filename .. string.rep(" ", 28 - #filename) .. "│")
-    table.insert(lines, "│ " .. filetype .. (ctx.selection and " (selected)" or "") .. string.rep(" ", 28 - #filetype - (ctx.selection and 11 or 0)) .. "│")
+    local ft_suffix = ctx.selection and " (selected)" or ""
+
+    table.insert(lines, box_rule("├", "┤", inner_w, "Context"))
+    table.insert(lines, box_row(filename, inner_w))
+    table.insert(lines, box_row(filetype .. ft_suffix, inner_w))
   end
-  
-  -- Modern controls
-  table.insert(lines, "├─── ⚡ Controls ──────────────────┤")
-  table.insert(lines, "│ Enter - Send • Esc - Close      │")
-  table.insert(lines, "│ ↑/↓ - History • Ctrl+U - Clear  │")
-  table.insert(lines, "│ " .. M.config.keymaps.clear_history .. " - Clear all • r - Refresh │")
-  table.insert(lines, "╰─────────────────────────────────╯")
+
+  -- Controls
+  table.insert(lines, box_rule("├", "┤", inner_w, "Controls"))
+  table.insert(lines, box_row("Enter - Send    Esc - Close", inner_w))
+  table.insert(lines, box_row("Up/Down - History   Ctrl+U - Clear", inner_w))
+  table.insert(lines, box_rule("╰", "╯", inner_w))
   table.insert(lines, "")
-  
-  -- Chat history with modern formatting
+
+  -- Chat history
   if #panel_state.chat_history > 0 then
-    for i, entry in ipairs(panel_state.chat_history) do
-      -- Timestamp
+    for _, entry in ipairs(panel_state.chat_history) do
       local timestamp = os.date("%H:%M", entry.timestamp or os.time())
-      
-      -- User message with modern styling
-      table.insert(lines, "┌─ " .. icons.user .. " You (" .. timestamp .. ") " .. string.rep("─", 15))
+
+      -- User message
+      table.insert(lines, msg_header(icons.user .. " You (" .. timestamp .. ")", inner_w))
       local user_lines = vim.split(entry.user_message, "\n", { plain = true })
       for _, line in ipairs(user_lines) do
         table.insert(lines, "│ " .. line)
       end
-      table.insert(lines, "└" .. string.rep("─", 35))
+      table.insert(lines, msg_footer(inner_w))
       table.insert(lines, "")
-      
-      -- Claude response with status indicators
+
+      -- Claude response
       if entry.loading then
-        table.insert(lines, "┌─ " .. icons.loading .. " Claude (thinking...) " .. string.rep("─", 8))
+        table.insert(lines, msg_header(icons.loading .. " Claude (thinking...)", inner_w))
         table.insert(lines, "│ " .. M.get_loading_animation())
       elseif entry.error then
-        table.insert(lines, "┌─ " .. icons.error .. " Claude (error) " .. string.rep("─", 13))
+        table.insert(lines, msg_header(icons.error .. " Claude (error)", inner_w))
         table.insert(lines, "│ " .. entry.error)
       else
-        table.insert(lines, "┌─ " .. icons.claude .. " Claude (" .. timestamp .. ") " .. string.rep("─", 12))
+        table.insert(lines, msg_header(icons.claude .. " Claude (" .. timestamp .. ")", inner_w))
         if entry.response then
           local response_lines = vim.split(entry.response, "\n", { plain = true })
           for _, line in ipairs(response_lines) do
@@ -723,18 +772,18 @@ function M.refresh_display()
           end
         end
       end
-      table.insert(lines, "└" .. string.rep("─", 35))
+      table.insert(lines, msg_footer(inner_w))
       table.insert(lines, "")
     end
   else
     -- Welcome message
-    table.insert(lines, "┌─ Welcome to Claude Chat! ───────┐")
-    table.insert(lines, "│                                 │")
-    table.insert(lines, "│  Start typing in the input      │")
-    table.insert(lines, "│  area below to chat with        │")
-    table.insert(lines, "│  Claude about your code!        │")
-    table.insert(lines, "│                                 │")
-    table.insert(lines, "└─────────────────────────────────┘")
+    table.insert(lines, box_rule("╭", "╮", inner_w, "Welcome"))
+    table.insert(lines, box_row("", inner_w))
+    table.insert(lines, box_row("Start typing in the input", inner_w))
+    table.insert(lines, box_row("area below to chat with", inner_w))
+    table.insert(lines, box_row("Claude about your code!", inner_w))
+    table.insert(lines, box_row("", inner_w))
+    table.insert(lines, box_rule("╰", "╯", inner_w))
     table.insert(lines, "")
   end
   
@@ -781,25 +830,25 @@ function M.apply_syntax_highlighting()
   
   for i, line in ipairs(lines) do
     local line_num = i - 1
-    
+
     -- Only apply highlighting if the function is available
     if vim.api.nvim_buf_add_highlight then
-      -- Highlight headers and borders
-      if line:match("^[╭├╰┌└].*[╮┤╯┐┘]$") then
+      -- Highlight box borders and rules (top, bottom, dividers, footers)
+      if line:match("^[╭├╰┌└│].*[╮┤╯┐┘│]$") or line:match("^[└╰]─") then
         vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.border, line_num, 0, -1)
-      
-      -- Highlight user messages
-      elseif line:match("^│.*" .. M.config.modern_ui.icons.user) or line:match("^┌.*" .. M.config.modern_ui.icons.user) then
+
+      -- Highlight user message headers
+      elseif line:match("^┌.*" .. M.config.modern_ui.icons.user) then
         vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.user_message, line_num, 0, -1)
-      
-      -- Highlight Claude messages
-      elseif line:match("^│.*" .. M.config.modern_ui.icons.claude) or line:match("^┌.*" .. M.config.modern_ui.icons.claude) then
+
+      -- Highlight Claude message headers
+      elseif line:match("^┌.*" .. M.config.modern_ui.icons.claude) then
         vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.claude_message, line_num, 0, -1)
-      
+
       -- Highlight loading messages
       elseif line:match(M.config.modern_ui.icons.loading) then
         vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.loading, line_num, 0, -1)
-      
+
       -- Highlight error messages
       elseif line:match(M.config.modern_ui.icons.error) then
         vim.api.nvim_buf_add_highlight(panel_state.main_buf, ns, M.config.modern_ui.colors.error, line_num, 0, -1)
